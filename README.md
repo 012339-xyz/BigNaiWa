@@ -3,6 +3,12 @@
 纯 **HTML + CSS + JavaScript** 的静态网页小游戏，零依赖、零构建、离线可玩。
 物理引擎（PBD 位置约束求解）是自己写的，没有引入 matter.js 等任何第三方库。
 
+## 🎮 在线玩
+
+**<https://yhsome.github.io/BigNaiWa/>**
+
+（GitHub Pages 托管，手机浏览器打开就能玩，也可以「添加到主屏幕」当 App 用。）
+
 ![预览](preview.png)
 
 ## 玩法
@@ -25,13 +31,17 @@
 
 ## 运行
 
-直接双击 `index.html` 即可（`file://` 协议下没有任何网络请求）。
+线上直接开 <https://yhsome.github.io/BigNaiWa/>；
+本地双击 `index.html` 即可（`file://` 协议下也能跑，排行榜同样可用）。
 也可以起个静态服务：
 
 ```bash
 python -m http.server 8080
 # 打开 http://localhost:8080
 ```
+
+部署：仓库打开 **Settings → Pages → Source = Deploy from a branch → main / (root)** 即可，
+根目录已经放了 `.nojekyll`，静态文件原样发布。
 
 ## 文件
 
