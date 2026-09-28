@@ -337,5 +337,30 @@ check('准星位置画的是当前这颗',
   gameDraws.some((d) => d.src === expectPending),
   '当前 ' + expectPending.split('/').pop());
 
+/* 冷却中（ready=false）准星也得画，否则棋盘上只剩右上角那颗，容易被当成当前 */
+S.pending = 7;
+S.next = 3;
+S.ready = false;
+drawnImages.length = 0;
+pump(1);
+const inCooldown = drawnImages.filter((d) => d.ctx === 'game');
+check('冷却期间准星仍然画着当前这颗',
+  inCooldown.some((d) => d.src === U.FRUITS[7].file),
+  '把 pending 设成 tier7，本帧绘制 ' + inCooldown.length + ' 张');
+
+/* 连续投放 120 次，「下一个」永远不等于当前 */
+freshGame();
+let sameCount = 0, watched = 0;
+const down8 = listeners.get(els.stage).pointerdown;
+for (let i = 0; i < 120; i++) {
+  if (S.over) { U.reset(); pump(5); }
+  down8({ clientX: 210, clientY: 120, pointerType: 'mouse' });
+  watched++;
+  if (S.next === S.pending) sameCount++;
+  pump(30);
+}
+check('「下一个」从不等于当前这颗', sameCount === 0,
+  watched + ' 次投放里撞了 ' + sameCount + ' 次');
+
 console.log(pass ? '\n物理手感自检通过' : '\n物理手感自检未通过');
 process.exit(pass ? 0 : 1);

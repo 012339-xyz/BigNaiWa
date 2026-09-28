@@ -107,13 +107,27 @@
   const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
   const rand  = (a, b) => a + Math.random() * (b - a);
 
-  function pickSpawnTier() {
+  /* 「下一个」是否允许和当前这颗相同。
+     允许的话有约 22% 概率两边显示同一张图，看起来像“下一个显示的是当前这个”，
+     所以默认避开；想恢复成完全随机就把它改成 false */
+  const AVOID_REPEAT = true;
+
+  function rollSpawnTier() {
     let r = Math.random(), acc = 0;
     for (let i = 0; i < SPAWN_TIERS.length; i++) {
       acc += SPAWN_WEIGHTS[i];
       if (r <= acc) return SPAWN_TIERS[i];
     }
     return SPAWN_TIERS[0];
+  }
+
+  function pickSpawnTier(avoid) {
+    if (!AVOID_REPEAT || avoid === undefined) return rollSpawnTier();
+    for (let i = 0; i < 6; i++) {
+      const t = rollSpawnTier();
+      if (t !== avoid) return t;
+    }
+    return rollSpawnTier();     // 兜底：万一连撞 6 次就认了
   }
 
   /* ---------------------------------------------------------
@@ -601,7 +615,7 @@
     state.ready = false;
     state.cooldown = DROP_MS / 1000;
     state.pending = state.next;
-    state.next = pickSpawnTier();
+    state.next = pickSpawnTier(state.pending);   // 和当前这颗不一样
     Sound.drop();
     drawNext();
     if (state.balls.length > 90) state.balls = state.balls.filter(b => !b.dead);
@@ -661,7 +675,7 @@
     state.danger = false;
     state.aimX = W / 2;
     state.pending = pickSpawnTier();
-    state.next = pickSpawnTier();
+    state.next = pickSpawnTier(state.pending);
     overlay.classList.remove('show');
     scoreEl.textContent = '0';
     bestEl.textContent = state.best;
@@ -852,34 +866,41 @@
   }
 
   function drawAim() {
-    if (state.over || !state.ready) return;
+    if (state.over) return;
     const tier = state.pending;
     const r = FRUITS[tier].r;
     const [lo, hi] = aimLimit(tier);
     const x = clamp(state.aimX, lo, hi);
     const bob = Math.sin(performance.now() / 320) * 2.5;
+    const ready = state.ready;
 
-    /* 虚线落点 */
+    /* 只有能投的时候才画落点辅助线 */
+    if (ready) {
+      ctx.save();
+      ctx.setLineDash([5, 8]);
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = 'rgba(200,140,90,.45)';
+      ctx.beginPath();
+      ctx.moveTo(x, DROP_Y + r + 4);
+      ctx.lineTo(x, H - WALL);
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.save();
+      ctx.globalAlpha = 0.22;
+      ctx.fillStyle = FRUITS[tier].c1;
+      ctx.beginPath();
+      ctx.arc(x, DROP_Y + bob, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    /* 冷却中也要画：淡一点表示“下一颗就是它、但还不能投”。
+       不然这段时间棋盘上只剩右上角的“下一个”，很容易被当成当前这颗 */
     ctx.save();
-    ctx.setLineDash([5, 8]);
-    ctx.lineWidth = 1.6;
-    ctx.strokeStyle = 'rgba(200,140,90,.45)';
-    ctx.beginPath();
-    ctx.moveTo(x, DROP_Y + r + 4);
-    ctx.lineTo(x, H - WALL);
-    ctx.stroke();
-    ctx.restore();
-
-    /* 落点提示圈 */
-    ctx.save();
-    ctx.globalAlpha = 0.22;
-    ctx.fillStyle = FRUITS[tier].c1;
-    ctx.beginPath();
-    ctx.arc(x, DROP_Y + bob, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
+    if (!ready) ctx.globalAlpha = 0.4;
     drawFruit(ctx, x, DROP_Y + bob, r, tier, 0, 1);
+    ctx.restore();
   }
 
   function drawEffects(dt) {
