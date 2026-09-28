@@ -1,0 +1,14 @@
+# 本地调试产物
+_parts_preview.png
+_preview.png
+_preview_*.png
+.edge-*/
+
+# Python
+__pycache__/
+*.pyc
+
+# 系统
+Thumbs.db
+.DS_Store
+desktop.ini
