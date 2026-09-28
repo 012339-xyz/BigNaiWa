@@ -267,5 +267,52 @@ kd({ code: 'KeyR', target: body, preventDefault() {} });
 check('R 键仍可重开', S.over === false && S.balls.length === 0,
   'over=' + S.over + ' 球数=' + S.balls.length);
 
+/* ---- 7. 判负规则：只有「卡在线上方且基本停住」才计时 ---- */
+console.log('[7] 判负规则');
+const DANGER_Y = 142;
+const UP_Y = 130;          // 顶在线上方的位置
+const DOWN_Y = 400;        // 线下方
+
+function hold(b, y, vy) { b.y = y; b.py = y; b.vy = vy || 0; b.vx = 0; b.landed = true; }
+function freshGame() { sandbox.__DNW__.reset(); pump(2); S.balls.length = 0; S.over = false; }
+
+/* 7a：线上方 + 基本静止 → 约 1.5 秒判负 */
+freshGame();
+const a7 = U.makeBall(210, UP_Y, 0);
+hold(a7, UP_Y, 0);
+S.balls.push(a7);
+let fA = 0;
+while (!S.over && fA < 240) { hold(a7, UP_Y, 0); pump(1); fA++; }
+check('卡在线上方 1.5 秒会判负', S.over === true,
+  '用时 ' + (fA / 60).toFixed(2) + ' 秒');
+
+/* 7b：线上方但高速飞过 → 不判负 */
+freshGame();
+const b7 = U.makeBall(210, UP_Y, 0);
+hold(b7, UP_Y, 0);
+S.balls.push(b7);
+let fB = 0;
+while (!S.over && fB < 300) { hold(b7, UP_Y, 800); pump(1); fB++; }   // 一直“在飞”
+check('高速飞过线上方不判负', S.over === false,
+  '线上方挂了 ' + (fB / 60).toFixed(2) + ' 秒，overTime=' + b7.overTime.toFixed(2));
+
+/* 7c：两只轮流卡在线上方 → 计时不共享，不判负 */
+freshGame();
+const c1 = U.makeBall(120, UP_Y, 0), c2 = U.makeBall(300, UP_Y, 0);
+hold(c1, DOWN_Y); hold(c2, DOWN_Y);
+S.balls.push(c1, c2);
+let fC = 0, aboveC = 0;
+const stint = Math.round(1.2 * 60);      // 每只连续停 1.2 秒（< 1.5）
+while (!S.over && fC < 900) {
+  const who = Math.floor(fC / stint) % 2;
+  hold(c1, who === 0 ? UP_Y : DOWN_Y);
+  hold(c2, who === 1 ? UP_Y : DOWN_Y);
+  if (who === 0 || who === 1) aboveC += 1;
+  pump(1); fC++;
+}
+check('两只轮流不算在一起', S.over === false,
+  '墙上合计线上方 ' + (aboveC / 60).toFixed(1) + ' 秒，各自 overTime=' +
+  c1.overTime.toFixed(2) + '/' + c2.overTime.toFixed(2));
+
 console.log(pass ? '\n物理手感自检通过' : '\n物理手感自检未通过');
 process.exit(pass ? 0 : 1);

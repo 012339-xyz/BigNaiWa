@@ -24,6 +24,8 @@
   const ITER      = 6;       // 每个子步的约束迭代次数
   const DROP_MS   = 360;     // 两次投放的最小间隔
   const OVER_LIMIT = 1.5;    // 越线持续多少秒判负
+  const REST_SPEED = 140;    // 线上方且速度低于它才算“卡住”（被弹飞路过的不算）
+  const REST_SPEED2 = REST_SPEED * REST_SPEED;
 
   const MAX_TIER  = 10;      // 大西瓜的索引
   const MAX_BONUS = 100;     // 两个大西瓜相撞的奖励分
@@ -615,11 +617,19 @@
       const b = state.balls[i];
       if (b.dead || !b.landed) continue;
       const top = b.y - b.r;
+
       if (top < DANGER_Y) {
-        b.overTime += dt;
-        danger = true;
-        if (b.overTime > OVER_LIMIT) { gameOver(); return; }
+        danger = true;                     // 只要线上方有东西，虚线就闪红
+        /* 只有「卡在线上方且基本停住」才计时：
+           被弹起来、正在飞过线的不算，免得误判 */
+        if (b.vx * b.vx + b.vy * b.vy < REST_SPEED2) {
+          b.overTime += dt;
+          if (b.overTime > OVER_LIMIT) { gameOver(); return; }
+        } else {
+          b.overTime = Math.max(0, b.overTime - dt * 2);
+        }
       } else {
+        /* 回到线下方 → 按 2 倍速倒扣，所以长时间待在线上方才会攒起来 */
         b.overTime = Math.max(0, b.overTime - dt * 2);
         if (b.overTime > 0) danger = true;
       }
