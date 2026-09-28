@@ -7,13 +7,17 @@
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const root = __dirname;
 
-function makeCtx() {
+/* 记录每个画布上 drawImage 了哪张图，用来验证“下一个”预览画的是哪一级 */
+const drawnImages = [];
+
+function makeCtx(id) {
   const g = { addColorStop() {} };
   return {
+    _id: id,
     setTransform() {}, save() {}, restore() {}, scale() {}, rotate() {}, translate() {},
     clearRect() {}, fillRect() {}, beginPath() {}, closePath() {}, moveTo() {}, lineTo() {},
     arc() {}, ellipse() {}, clip() {}, stroke() {}, fill() {}, setLineDash() {},
-    drawImage() {},
+    drawImage(img) { drawnImages.push({ ctx: this._id, src: (img && img.__src) || null }); },
     createLinearGradient: () => g, createRadialGradient: () => g,
     measureText: () => ({ width: 10 }), fillText() {}, strokeText() {},
     globalAlpha: 1, fillStyle: '', strokeStyle: '', lineWidth: 1,
@@ -26,7 +30,7 @@ function makeEl(id) {
   const el = {
     id, style: {}, textContent: '', width: 680, height: 160, _c: new Set(),
     classList: { add: c => el._c.add(c), remove: c => el._c.delete(c), contains: c => el._c.has(c) },
-    getContext: () => el._ctx || (el._ctx = makeCtx()),
+    getContext: () => el._ctx || (el._ctx = makeCtx(id)),
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 420, height: 700 }),
     addEventListener(t, fn) { if (!listeners.has(el)) listeners.set(el, {}); listeners.get(el)[t] = fn; },
     querySelector(sel) {
@@ -59,7 +63,7 @@ const sandbox = {
   /* 桩件图片：设了 src 就立刻“加载完成”，用来覆盖贴图绘制分支 */
   Image: class {
     constructor() { this.width = 512; this.height = 512; this.naturalWidth = 512; this.onload = null; this.onerror = null; }
-    set src(v) { this._src = v; if (this.onload) this.onload(); }
+    set src(v) { this._src = v; this.__src = v; if (this.onload) this.onload(); }
     get src() { return this._src; }
   }
 };
@@ -313,6 +317,25 @@ while (!S.over && fC < 900) {
 check('两只轮流不算在一起', S.over === false,
   '墙上合计线上方 ' + (aboveC / 60).toFixed(1) + ' 秒，各自 overTime=' +
   c1.overTime.toFixed(2) + '/' + c2.overTime.toFixed(2));
+
+/* ---- 8. 界面：棋盘右上角画的是不是「下一个」 ---- */
+console.log('[8] 下一个预览');
+freshGame();
+S.pending = 0;          // 当前这颗（准星位置画的就是它）
+S.next = 5;             // 下一个
+S.ready = true;
+drawnImages.length = 0;
+pump(1);
+const gameDraws = drawnImages.filter((d) => d.ctx === 'game');
+const lastDraw = gameDraws[gameDraws.length - 1];
+const expectNext = U.FRUITS[5].file;
+const expectPending = U.FRUITS[0].file;
+check('右上角预览 = 下一个（不是当前这颗）',
+  !!lastDraw && lastDraw.src === expectNext,
+  '画的是 ' + (lastDraw && lastDraw.src ? lastDraw.src.split('/').pop() : '(无)'));
+check('准星位置画的是当前这颗',
+  gameDraws.some((d) => d.src === expectPending),
+  '当前 ' + expectPending.split('/').pop());
 
 console.log(pass ? '\n物理手感自检通过' : '\n物理手感自检未通过');
 process.exit(pass ? 0 : 1);

@@ -922,7 +922,8 @@
   }
 
   function drawTopPreview() {
-    const tier = state.ready ? state.pending : state.next;
+    /* 棋盘右上角永远显示「下一个」——当前那颗在准星位置上画着，别搞混 */
+    const tier = state.next;
     const r = 15;
     const x = W - WALL - 30;
     const y = 32;
