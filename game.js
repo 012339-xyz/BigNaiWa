@@ -1075,7 +1075,17 @@
 
   stage.addEventListener('contextmenu', (e) => e.preventDefault());
 
+  /* 在输入框里打字时不要抢按键 */
+  function isTyping(e) {
+    const t = e.target;
+    if (!t) return false;
+    const tag = (t.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || t.isContentEditable === true;
+  }
+
   window.addEventListener('keydown', (e) => {
+    if (isTyping(e)) return;
+
     if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
       state.aimX = clamp(state.aimX - 14, WALL, W);
       e.preventDefault();
@@ -1083,8 +1093,8 @@
       state.aimX = clamp(state.aimX + 14, WALL, W);
       e.preventDefault();
     } else if (e.code === 'Space' || e.code === 'Enter' || e.code === 'ArrowDown') {
-      if (state.over) reset(); else tryDrop();
-      e.preventDefault();
+      /* 空格/回车只在局内投放；结束后不再用它们重开（免得手快连着开新局） */
+      if (!state.over) { tryDrop(); e.preventDefault(); }
     } else if (e.code === 'KeyR') {
       reset();
       e.preventDefault();

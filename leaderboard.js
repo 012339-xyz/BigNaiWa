@@ -17,6 +17,7 @@
   const FETCH_LIMIT = 100;          // 接口单次最多返回 100 条
   const TOP_N = 20;                 // 榜单只展示前 20
   const NAME_KEY = 'danaiwa.name';
+  const DEFAULT_NAME = '默认用户';   // 没填昵称就用这个
   const MUTE_MIN_GAP = 3000;        // 两次提交至少间隔 3 秒
   const MAX_SCORE = 99999999;       // 明显离谱的成绩直接不收
 
@@ -96,6 +97,18 @@
     try { localStorage.setItem(NAME_KEY, n); } catch (e) { /* 忽略 */ }
   }
 
+  /* 实际提交用的昵称：没填就用「默认用户」 */
+  function myName() {
+    return loadName() || DEFAULT_NAME;
+  }
+
+  /* 分数够不够上榜：榜单没满都能进，满了要 >= 最后一名 */
+  function qualifies(rows, score) {
+    if (!(score > 0)) return false;
+    if (rows.length < TOP_N) return true;
+    return score >= rows[rows.length - 1].score;
+  }
+
   /* ---------------------------------------------------------
    *  界面
    * ------------------------------------------------------- */
@@ -103,17 +116,30 @@
   const listEl = $('boardList');
   const modal = $('boardModal');
   const msgEl = $('submitMsg');
-  const nameInput = $('nameInput');
+  const nickInput = $('nickInput');
+  const nameLabel = $('myNameLabel');
   const submitBtn = $('submitBtn');
   const submitBox = $('submitBox');
 
   let lastSubmitAt = 0;
   let submitting = false;
+  let pendingScore = 0;          // 本局分数（结算/重试用）
 
   function setMsg(text, kind) {
     if (!msgEl) return;
     msgEl.textContent = text || '';
     msgEl.className = 'submit-msg' + (kind ? ' is-' + kind : '');
+  }
+
+  function showRetry(show) {
+    if (submitBtn) submitBtn.hidden = !show;
+  }
+
+  /* 昵称在界面上出现的所有地方一起刷新 */
+  function paintName() {
+    const n = myName();
+    if (nameLabel) nameLabel.textContent = n;
+    if (nickInput && document.activeElement !== nickInput) nickInput.value = loadName();
   }
 
   function boardMessage(text) {
@@ -191,57 +217,69 @@
   }
 
   /* ---------------------------------------------------------
-   *  提交
+   *  结算 / 提交
    * ------------------------------------------------------- */
 
-  function submit() {
-    if (submitting || !submitBtn) return;
-    const score = Number(submitBtn.dataset.score || 0);
-    const name = cleanName(nameInput && nameInput.value);
-
-    if (!name) {
-      setMsg('先起个昵称吧', 'bad');
-      if (nameInput) nameInput.focus();
-      return;
+  /* 真正写库 */
+  function pushScore(name, score, viaRetry) {
+    if (submitting) return Promise.resolve(false);
+    if (!viaRetry) {
+      const now = Date.now();
+      if (now - lastSubmitAt < MUTE_MIN_GAP) {
+        setMsg('刚提交过啦，稍等一下', 'bad');
+        return Promise.resolve(false);
+      }
     }
-    if (!score) {
-      setMsg('0 分就不用上榜了，再玩一局吧', 'bad');
-      return;
-    }
-    const now = Date.now();
-    if (now - lastSubmitAt < MUTE_MIN_GAP) {
-      setMsg('提交太快啦，稍等一下', 'bad');
-      return;
-    }
-
     submitting = true;
-    submitBtn.disabled = true;
+    showRetry(false);
     setMsg('正在提交…', '');
-    saveName(name);
 
-    addScore(name, score).then(() => {
+    return addScore(name, score).then(() => {
       lastSubmitAt = Date.now();
-      setMsg('已上榜 ✓', 'good');
-      submitBtn.textContent = '已提交';
-      return refreshBoard(score).catch(() => {});
+      setMsg('已上榜 ✓　' + name + ' · ' + score + ' 分', 'good');
+      return refreshBoard(score).then(() => true, () => true);
     }).catch((err) => {
       setMsg('提交失败：' + err.message, 'bad');
-    }).then(() => {
+      showRetry(true);
+      return false;
+    }).then((ok) => {
       submitting = false;
-      submitBtn.disabled = false;
+      return ok;
     });
   }
 
-  /* 游戏结束时调用：把本局分数接过来，允许提交 */
-  function onGameOver(score) {
-    if (!submitBox || !submitBtn) return;
-    submitBtn.dataset.score = String(score);
-    submitBtn.textContent = '提交到排行榜';
-    if (nameInput && !nameInput.value) nameInput.value = loadName();
+  /* 手动重试（只在自动提交失败后出现） */
+  function retry() {
+    if (!pendingScore) return;
+    pushScore(myName(), pendingScore, true);
+  }
 
-    const canSubmit = score > 0;
-    submitBox.style.display = canSubmit ? '' : 'none';
-    setMsg(canSubmit ? '' : '', '');
+  /* 打完一局：自动结算并上榜（没填昵称就用「默认用户」） */
+  function onGameOver(score) {
+    if (!submitBox) return;
+    pendingScore = Number(score) || 0;
+    paintName();
+    showRetry(false);
+
+    if (!(pendingScore > 0)) {
+      submitBox.style.display = 'none';
+      return;
+    }
+    submitBox.style.display = '';
+    setMsg('正在结算…', '');
+
+    refreshBoard(null).then((rows) => {
+      if (pendingScore <= 0) return;
+      if (!qualifies(rows, pendingScore)) {
+        setMsg('这局 ' + pendingScore + ' 分，没进前 ' + TOP_N + '，再打一局吧', '');
+        return;
+      }
+      return pushScore(myName(), pendingScore, true);
+    }).catch((err) => {
+      /* 读榜都失败，就不盲目写入，给个重试 */
+      setMsg('排行榜连不上（' + err.message + '），可以点下面重试', 'bad');
+      showRetry(true);
+    });
   }
 
   /* ---------------------------------------------------------
@@ -269,12 +307,32 @@
       });
     }
 
-    if (submitBtn) submitBtn.addEventListener('click', submit);
-    if (nameInput) {
-      nameInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); submit(); }
+    if (submitBtn) submitBtn.addEventListener('click', retry);
+
+    /* 昵称随时能改，改完记本地；空着就用默认用户 */
+    if (nickInput) {
+      nickInput.value = loadName();
+      const commit = () => {
+        saveName(cleanName(nickInput.value));
+        nickInput.value = loadName();
+        paintName();
+      };
+      nickInput.addEventListener('change', commit);
+      nickInput.addEventListener('blur', commit);
+      nickInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); nickInput.blur(); }
       });
     }
+
+    const editNameBtn = $('editNameBtn');
+    if (editNameBtn) {
+      editNameBtn.addEventListener('click', () => {
+        openBoard();
+        if (nickInput) setTimeout(() => { nickInput.focus(); nickInput.select(); }, 260);
+      });
+    }
+
+    paintName();
 
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') closeBoard();
@@ -293,6 +351,9 @@
     refresh: refreshBoard,
     onGameOver: onGameOver,
     fetchTop: fetchTop,
-    submitScore: addScore
+    submitScore: addScore,
+    myName: myName,
+    setName: function (n) { saveName(cleanName(n)); paintName(); },
+    hasName: function () { return !!loadName(); }
   };
 })();

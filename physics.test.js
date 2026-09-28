@@ -43,6 +43,7 @@ const els = {};
  'next', 'chain', 'soundBtn', 'resetBtn', 'restartBtn'].forEach(id => els[id] = makeEl(id));
 
 const rafQueue = [];
+const winListeners = {};
 const sandbox = {
   console, Math, Date, JSON, Object, Array, Number, String, Boolean, Error, isNaN,
   performance: { now: () => Date.now() },
@@ -53,7 +54,7 @@ const sandbox = {
     addEventListener() {}, createElement: () => makeEl('tmp')
   },
   localStorage: { _d: {}, getItem(k) { return this._d[k] ?? null; }, setItem(k, v) { this._d[k] = String(v); } },
-  addEventListener() {},
+  addEventListener(t, fn) { winListeners[t] = fn; },
   navigator: {},
   /* 桩件图片：设了 src 就立刻“加载完成”，用来覆盖贴图绘制分支 */
   Image: class {
@@ -229,6 +230,42 @@ pump(30);                       // 等投放冷却走完
 const n1 = S.balls.length;
 L.pointerdown({ clientX: 300, clientY: 400, pointerType: 'mouse' });
 check('鼠标按下即投放', S.balls.length === n1 + 1, '球数 = ' + S.balls.length);
+
+/* ---- 6. 键盘：结束后空格不再重开，输入框里不抢按键 ---- */
+console.log('[6] 键盘行为');
+sandbox.__DNW__.reset();
+pump(30);
+const kd = winListeners.keydown;
+const body = { tagName: 'BODY' };
+const input = { tagName: 'INPUT' };
+const noPrevent = { preventDefault() {} };
+
+/* 局内：空格投放 */
+S.balls.length = 0;
+S.ready = true;
+kd({ code: 'Space', target: body, preventDefault() {} });
+check('局内空格能投放', S.balls.length === 1, '球数 = ' + S.balls.length);
+
+/* 输入框里打字：空格不该投放 */
+pump(30);
+const nInput = S.balls.length;
+kd({ code: 'Space', target: input, preventDefault() {} });
+check('输入框里空格不投放', S.balls.length === nInput, '球数 = ' + S.balls.length);
+
+/* 结束后：空格不再重开 */
+S.over = true;
+const nOver = S.balls.length;
+kd({ code: 'Space', target: body, preventDefault: noPrevent.preventDefault });
+check('结束后空格不重开', S.over === true && S.balls.length === nOver,
+  'over=' + S.over + ' 球数=' + S.balls.length);
+kd({ code: 'Enter', target: body, preventDefault: noPrevent.preventDefault });
+check('结束后回车也不重开', S.over === true && S.balls.length === nOver,
+  'over=' + S.over + ' 球数=' + S.balls.length);
+
+/* R 仍然能重开 */
+kd({ code: 'KeyR', target: body, preventDefault() {} });
+check('R 键仍可重开', S.over === false && S.balls.length === 0,
+  'over=' + S.over + ' 球数=' + S.balls.length);
 
 console.log(pass ? '\n物理手感自检通过' : '\n物理手感自检未通过');
 process.exit(pass ? 0 : 1);

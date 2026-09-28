@@ -28,17 +28,18 @@
         <p class="dialog-best">最高分 <span id="finalBest">0</span></p>
 
         <div class="submit-box" id="submitBox">
-          <input class="name-input" id="nameInput" type="text" maxlength="12"
-                 placeholder="昵称（最多 12 字）" autocomplete="nickname" enterkeyhint="send">
-          <button class="btn btn-primary" id="submitBtn" type="button">提交到排行榜</button>
-          <p class="submit-msg" id="submitMsg"></p>
+          <p class="submit-msg" id="submitMsg">正在结算…</p>
+          <p class="my-name">昵称：<strong id="myNameLabel">默认用户</strong>
+            <button class="link-btn" id="editNameBtn" type="button">改昵称</button>
+          </p>
+          <button class="btn" id="submitBtn" type="button" hidden>重试提交</button>
         </div>
 
         <div class="dialog-actions">
           <button class="btn" id="boardBtn2" type="button">🏆 排行榜</button>
           <button class="btn btn-primary" id="restartBtn" type="button">再来一局</button>
         </div>
-        <p class="dialog-hint">按 R 键 / 空格 也可重新开始</p>
+        <p class="dialog-hint">按 R 键也可重新开始</p>
       </div>
     </div>
   </section>
@@ -100,6 +101,11 @@
       <h2>🏆 排行榜</h2>
       <button class="icon-btn" id="boardClose" type="button" aria-label="关闭">✕</button>
     </header>
+    <div class="nick-row">
+      <label class="nick-label" for="nickInput">我的昵称</label>
+      <input class="nick-input" id="nickInput" type="text" maxlength="12"
+             placeholder="默认用户" autocomplete="nickname" enterkeyhint="done">
+    </div>
     <div class="board-list" id="boardList"></div>
     <footer class="modal-foot">
       <span class="board-note">取最近的 100 条记录排名</span>
