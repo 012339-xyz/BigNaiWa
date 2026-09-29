@@ -121,82 +121,77 @@ const ball = (y, r) => ({ x: 200, y, r: r || 30, dead: false, landed: true, over
   ok(A.G.state.balls.every((b) => b.y - b.r >= 148), '留下的全退到警戒线以下');
   eq(A.G.revive(), false, '没死的时候不能复活');
 
-  /* ---------- B. 没有广告 ---------- */
-  console.log('\n[B] 没有广告 SDK（REQUIRE_AD=false）');
+  /* ---------- B. 没有广告 → 根本不给复活 ---------- */
+  console.log('\n[B] 没有广告 SDK（REQUIRE_AD=true）→ 不提供复活');
   const B = setup(false);
   await sleep(200);
-  eq(B.els.revivePrompt.hidden, true, '开局时第一屏是隐藏的');
-  eq(B.els.overPanel.hidden, false, '开局时显示的是结算屏');
+  eq(B.els.revivePrompt.hidden, true, '开局第一屏是隐藏的');
+  eq(B.els.overPanel.hidden, false, '开局显示结算屏');
+  eq(B.AD.offerRevive(), false, '拿不到广告 → 不接管弹窗，直接走结算');
+  eq(B.els.revivePrompt.hidden, true, '询问屏不出现');
+  eq(B.els.overPanel.hidden, false, '直接是结算屏');
+  eq(B.state.gameOverCalls, 0, 'offerRevive 自己不算结算');
 
-  eq(B.AD.offerRevive(), true, '越线后接管弹窗，改为先问要不要复活');
-  eq(B.els.revivePrompt.hidden, false, '第一屏（询问）出现');
-  eq(B.els.overPanel.hidden, true, '第二屏（结算）让位');
-  eq(B.state.gameOverCalls, 0, '还没提交成绩');
-  eq(B.els.reviveBtn.textContent, '🔄 复活一次', '没有广告时文案如实写「复活一次」');
-  ok(B.els.reviveHint.textContent.indexOf('消除最顶上') >= 0, '提示里说清了效果');
-
-  B.G.state.balls = [ball(600), ball(120)];
-  B.G.state.over = true;
-  B.els.reviveBtn.click();
-  await sleep(250);
-  eq(B.state.adCalls.length, 0, '没有调用任何广告 SDK');
-  eq(B.G.state.over, false, '直接复活成功');
-  eq(B.G.state.balls.length, 1, '最顶上那颗被消除');
-  eq(B.els.revivePrompt.hidden, true, '复活后询问屏收起');
-  eq(B.state.gameOverCalls, 0, '复活成功 → 这局还没有结束，不提交成绩');
-
-  /* ---------- C. 拒绝复活 → 进结算 ---------- */
-  console.log('\n[C] 点「不了，结束吧」才进结算');
-  const C = setup(false);
+  /* ---------- C. 有广告 → 两段式 ---------- */
+  console.log('\n[C] 有广告时先问，拒绝才结算');
+  const C = setup(true);
   await sleep(200);
-  eq(C.AD.offerRevive(), true, '越线后先问一句');
+  eq(C.AD.offerRevive(), true, '越线后接管弹窗，先问要不要复活');
+  eq(C.els.revivePrompt.hidden, false, '第一屏（询问）出现');
+  eq(C.els.overPanel.hidden, true, '第二屏（结算）让位');
+  eq(C.els.reviveBtn.textContent, '📺 看广告复活', '文案是「看广告复活」');
+  eq(C.state.gameOverCalls, 0, '还没提交成绩');
+
   C.els.giveUpBtn.click();
   await sleep(250);
   eq(C.els.revivePrompt.hidden, true, '拒绝后询问屏收起');
   eq(C.els.overPanel.hidden, false, '结算屏出现');
   eq(C.els.overlay.classList.contains('show'), true, '遮罩显示');
-  eq(C.state.gameOverCalls, 1, '这时候才把成绩交给排行榜，且只交一次');
+  eq(C.state.gameOverCalls, 1, '这时候才交成绩，且只交一次');
 
   /* ---------- D. 一局限一次 ---------- */
   console.log('\n[D] 一局只能救一次');
-  const D = setup(false);
+  const D = setup(true);
   await sleep(200);
   eq(D.AD.offerRevive(), true, '第一次问');
   D.G.state.balls = [ball(600), ball(120)];
   D.G.state.over = true;
   D.els.reviveBtn.click();
   await sleep(250);
-  eq(D.G.state.over, false, '第一次复活成功');
+  eq(D.state.adCalls.length, 1, '先播了广告');
+  eq(D.G.state.over, false, '广告看完才复活');
+  eq(D.G.state.balls.length, 1, '最顶上那颗被消除');
+  eq(D.els.revivePrompt.hidden, true, '询问屏收起');
+  eq(D.state.gameOverCalls, 0, '复活成功 → 这局没结束，不交成绩');
   eq(D.AD.offerRevive(), false, '同一局第二次不再问，直接结算');
-  eq(D.els.overPanel.hidden, false, '直接显示结算屏');
   D.AD.newGame();
   eq(D.AD.offerRevive(), true, '新一局名额归还，又问一次');
 
-  /* ---------- E. 有广告 ---------- */
-  console.log('\n[E] 有广告 SDK');
+  /* ---------- E. 广告没看成 → 不给复活 ---------- */
+  console.log('\n[E] 广告没看成就不复活');
   const E = setup(true);
   await sleep(200);
-  ok(E.AD.ready() === true, '识别到 show_9876543');
-  eq(E.AD.offerRevive(), true, '接管弹窗');
-  eq(E.els.reviveBtn.textContent, '📺 看广告复活', '文案变成「看广告复活」');
-  E.G.state.balls = [ball(700), ball(300)];
+  E.sandbox.window.show_9876543 = function (opts) { E.state.adCalls.push(opts); return Promise.reject(new Error('no fill')); };
+  E.AD.offerRevive();
+  E.G.state.balls = [ball(600), ball(120)];
   E.G.state.over = true;
   E.els.reviveBtn.click();
-  await sleep(250);
-  eq(E.state.adCalls.length, 1, 'SDK 被调用 1 次');
-  eq(E.state.adCalls[0] && E.state.adCalls[0].type, 'reward', '请求类型是 reward');
-  eq(E.G.state.over, false, '广告看完后才复活');
-  eq(E.G.state.balls.length, 1, '最顶上那颗被消除');
+  await sleep(400);
+  eq(E.G.state.over, true, '广告失败 → 仍然是判负状态');
+  eq(E.G.state.balls.length, 2, '一颗都没消除');
+  eq(E.state.gameOverCalls, 0, '没复活、也没结算（还停在询问屏等玩家决定）');
 
   /* ---------- F. 插屏 ---------- */
   console.log('\n[F] 插屏按频次触发，不影响结算');
-  const before = E.state.adCalls.filter((c) => c.type === 'inApp').length;
-  E.sandbox.window.DanaiwaBoard.onGameOver(1);
-  E.sandbox.window.DanaiwaBoard.onGameOver(2);
-  eq(E.state.adCalls.filter((c) => c.type === 'inApp').length, before, '前两局不弹插屏');
-  E.sandbox.window.DanaiwaBoard.onGameOver(3);
-  eq(E.state.adCalls.filter((c) => c.type === 'inApp').length, before + 1, '第三局弹一次插屏');
-  eq(E.state.gameOverCalls, 3, '原 onGameOver 每局都被正常调用');
+  const F = setup(true);
+  await sleep(200);
+  const before = F.state.adCalls.filter((c) => c.type === 'inApp').length;
+  F.sandbox.window.DanaiwaBoard.onGameOver(1);
+  F.sandbox.window.DanaiwaBoard.onGameOver(2);
+  eq(F.state.adCalls.filter((c) => c.type === 'inApp').length, before, '前两局不弹插屏');
+  F.sandbox.window.DanaiwaBoard.onGameOver(3);
+  eq(F.state.adCalls.filter((c) => c.type === 'inApp').length, before + 1, '第三局弹一次插屏');
+  eq(F.state.gameOverCalls, 3, '原 onGameOver 每局都被正常调用');
 
   console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
   process.exit(fail ? 1 : 0);
