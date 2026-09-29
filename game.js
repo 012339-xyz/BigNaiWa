@@ -651,16 +651,28 @@
     state.danger = danger;
   }
 
-  function gameOver() {
-    state.over = true;
-    finalScoreEl.textContent = state.score;
-    finalBestEl.textContent = state.best;
+  /* 进入正式结算：弹结算窗 + 交成绩给排行榜。
+     被「要不要复活」那一屏挡过之后，玩家拒绝复活才会走到这里。 */
+  function settle() {
     overlay.classList.add('show');
-    Sound.over();
     /* 交给排行榜模块（没加载也不影响） */
     if (window.DanaiwaBoard && window.DanaiwaBoard.onGameOver) {
       window.DanaiwaBoard.onGameOver(state.score);
     }
+  }
+
+  function gameOver() {
+    state.over = true;
+    finalScoreEl.textContent = state.score;
+    finalBestEl.textContent = state.best;
+    Sound.over();
+
+    /* 先让广告模块问一句「要不要看广告复活」；
+       它接管了就由它决定后面什么时候进结算 */
+    if (window.DNWAd && typeof window.DNWAd.offerRevive === 'function' && window.DNWAd.offerRevive()) {
+      return;
+    }
+    settle();
   }
 
   /* 复活力度：
@@ -1255,5 +1267,5 @@
   }
 
   /* 调试句柄（控制台可用）：__DNW__.state / .reset() / .drop() / .FRUITS / .render() */
-  window.__DNW__ = { state, reset, revive, tryDrop, stepPhysics, FRUITS, render, resizeCanvas, shapeOf, makeBall };
+  window.__DNW__ = { state, reset, revive, settle, gameOver, tryDrop, stepPhysics, FRUITS, render, resizeCanvas, shapeOf, makeBall };
 })();

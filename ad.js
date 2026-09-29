@@ -84,18 +84,56 @@
 
   function el(id) { return document.getElementById(id); }
 
-  /* 复活按钮：按钮本身在结算弹窗里（只有结束时才看得到），
-     这里只决定「还有没有名额」以及「标签写什么」——
-     有真广告就写「看广告复活」，没有就写「复活一次」，不骗玩家。 */
+  /* 弹窗里有两屏：第一屏问要不要复活（#revivePrompt），第二屏才是正式结算（#overPanel）。
+     没接广告模块时 HTML 默认就是「第一屏隐藏、第二屏显示」，所以游戏本身不受影响。 */
+  function showPrompt(show) {
+    const p = el('revivePrompt'), s = el('overPanel');
+    if (p) p.hidden = !show;
+    if (s) s.hidden = !!show;
+  }
+
+  /* 能不能给一次复活机会 */
+  function canOffer() {
+    if (revivedThisGame >= REVIVE_PER_GAME) return false;
+    if (REQUIRE_AD && !sdk()) return false;
+    if (!el('revivePrompt') || !el('overPanel')) return false;
+    return true;
+  }
+
+  /* 复活按钮的文案随「有没有真广告」切换，不骗玩家 */
   function syncReviveBtn() {
     const btn = el('reviveBtn');
     if (!btn) return;
     const ad = ready();
-    const show = revivedThisGame < REVIVE_PER_GAME && (ad || !REQUIRE_AD);
-    btn.hidden = !show;
-    if (!show) return;
     btn.textContent = ad ? '📺 看广告复活' : '🔄 复活一次';
     btn.title = ad ? '看完广告，消除最顶上那颗水果' : '消除最顶上那颗水果（一局限一次）';
+    const hint = el('reviveHint');
+    if (hint) {
+      hint.textContent = ad
+        ? '看一段广告，消除最顶上那颗水果，接着玩'
+        : '消除最顶上那颗水果，接着玩（一局限一次）';
+    }
+    const sc = el('reviveScore');
+    const g = window.__DNW__;
+    if (sc && g && g.state) sc.textContent = g.state.score;
+  }
+
+  /* 由 game.js 的 gameOver() 调用：接管弹窗，先问要不要复活。
+     返回 true = 我接管了，结算推迟；false = 按正常流程直接结算。 */
+  function offerRevive() {
+    if (!canOffer()) { showPrompt(false); return false; }
+    syncReviveBtn();
+    showPrompt(true);
+    const ov = el('overlay');
+    if (ov) ov.classList.add('show');       // 遮罩得自己弹出来，gameOver 已经不再管这事了
+    return true;
+  }
+
+  /* 玩家拒绝复活（或复活用完了）：切到正式结算 */
+  function toSettle() {
+    showPrompt(false);
+    const g = window.__DNW__;
+    if (g && typeof g.settle === 'function') g.settle();
   }
 
   function onReviveClick() {
@@ -115,20 +153,20 @@
     gate.then(function (ok) {
       busy = false;
       if (btn) btn.disabled = false;
-      if (!ok) { syncReviveBtn(); return; }
-      if (!g.revive()) { syncReviveBtn(); return; }
+      if (!ok) return;
+      if (!g.revive()) { toSettle(); return; }
       revivedThisGame++;
-      syncReviveBtn();
+      showPrompt(false);          // 遮罩由 revive() 收起
     }, function () {
       busy = false;
       if (btn) btn.disabled = false;
-      syncReviveBtn();
     });
   }
 
   /* 新一局开始：把复活名额还回去 */
   function newGame() {
     revivedThisGame = 0;
+    showPrompt(false);
     syncReviveBtn();
   }
 
@@ -139,7 +177,7 @@
     const orig = B.onGameOver;
     B.onGameOver = function () {
       games++;
-      /* SDK 是异步来的，而且不一定什么时候到；结算时再确认一次按钮 */
+      /* SDK 是异步来的，而且不一定什么时候到；结算时再确认一次文案 */
       setTimeout(syncReviveBtn, 900);
       if (INTERSTITIAL_EVERY > 0 && games % INTERSTITIAL_EVERY === 0) interstitial();
       try { return orig.apply(this, arguments); } catch (e) { return undefined; }
@@ -152,6 +190,9 @@
     const btn = el('reviveBtn');
     if (btn) btn.addEventListener('click', onReviveClick);
 
+    const giveUp = el('giveUpBtn');
+    if (giveUp) giveUp.addEventListener('click', toSettle);
+
     const restart = el('restartBtn');
     if (restart) restart.addEventListener('click', newGame);
 
@@ -159,6 +200,7 @@
       if (e.key === 'r' || e.key === 'R') newGame();
     });
 
+    showPrompt(false);
     syncReviveBtn();
   }
 
@@ -182,11 +224,13 @@
     document.addEventListener('visibilitychange', syncReviveBtn);
   }
 
-  /* 给别处留的钩子（控制台调试用） */
+  /* 给别处留的钩子（game.js 调 offerRevive，控制台也能调试） */
   window.DNWAd = {
     ready: ready,
     rewarded: rewarded,
     interstitial: interstitial,
+    offerRevive: offerRevive,
+    settle: toSettle,
     newGame: newGame
   };
 
