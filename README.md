@@ -109,7 +109,7 @@ python -m http.server 8080
 | 项 | 值 |
 | --- | --- |
 | 接口 | `POST https://tinywebdb.appinventor.space/api` |
-| 账号 | `user=danaiwa` / `secret=6f52518c` |
+| 账号 | `user` / `secret` 写在 `leaderboard.js` 顶部（构建后只以编码形式存在于 `leaderboard.min.js`） |
 | 用到的 action | `update`（写）、`search`（按 tag 前缀读）、`delete`（删） |
 | tag | `dnw_<时间戳36进制>_<随机4位>` |
 | value | `{"n":"昵称","s":分数,"t":时间戳}` |
@@ -119,12 +119,12 @@ python -m http.server 8080
 
 ```js
 // 提交
-POST user=danaiwa&secret=6f52518c&action=update
+POST user=<你的 user>&secret=<你的 secret>&action=update
      &tag=dnw_mukuffr8_435q
      &value={"n":"奶娃大王","s":4321,"t":1759000000000}
 
 // 读榜
-POST user=danaiwa&secret=6f52518c&action=search&no=1&count=100&tag=dnw_&type=both
+POST user=<你的 user>&secret=<你的 secret>&action=search&no=1&count=100&tag=dnw_&type=both
 → {"dnw_mukuffr8_435q":"{\"n\":\"奶娃大王\",\"s\":4321,\"t\":1759000000000}"}
 ```
 

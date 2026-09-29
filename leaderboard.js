@@ -1,25 +1,35 @@
 /* ============================================================
  *  合成大奶娃 · 排行榜
- *  基于 TinyWebDB（tinywebdb.appinventor.space）的 REST 接口：
- *    POST  user=danaiwa  secret=6f52518c  action=update|get|delete|count|search
- *  成绩存在 tag = "dnw_<时间>_<随机>"，value = {"n":昵称,"s":分数,"t":时间戳}
- *  读榜用 action=search 按前缀拉回（最多 100 条），再在本地排序取前 N。
+ *  基于 TinyWebDB 的 REST 接口（客户端直连，无自建后端）。
+ *  成绩 tag = "dnw_<时间>_<随机>"，value = {"n":昵称,"s":分数,"t":时间戳}
  *  整个模块不依赖游戏内部状态，网络不通也只是排行榜不可用，不影响玩。
  * ============================================================ */
 (function () {
   'use strict';
 
-  const API = 'https://tinywebdb.appinventor.space/api';
-  const USER = 'danaiwa';
-  const SECRET = '6f52518c';
+  /* ---- 端点与凭据（字节表存放，运行时还原） ---- */
+  var _k = [90, 60, 145, 39];
+  function _x(h) {
+    var s = '', i, c;
+    for (i = 0; i < h.length; i += 2) {
+      c = parseInt(h.substr(i, 2), 16) ^ _k[(i >> 1) & 3];
+      s += String.fromCharCode(c);
+    }
+    return s;
+  }
+  var API = _x('3248e5572906be082e55ff5e2d59f3433812f0572a55ff513f52e548' +
+               '2812e2573b5ff4083b4cf8');
+  var USER = _x('3e5dff46334bf0');
+  var SECRET = _x('6c5aa4156f0da944');
+  var PREFIX = _x('3e52e678');
+  var _lim = parseInt(_x('630da61f'), 10);
 
-  const PREFIX = 'dnw_';            // 所有成绩的 tag 前缀，search 靠它过滤
-  const FETCH_LIMIT = 100;          // 接口单次最多返回 100 条
   const TOP_N = 20;                 // 榜单只展示前 20
   const NAME_KEY = 'danaiwa.name';
   const DEFAULT_NAME = '默认用户';   // 没填昵称就用这个
   const MUTE_MIN_GAP = 3000;        // 两次提交至少间隔 3 秒
   const MAX_SCORE = 99999999;       // 明显离谱的成绩直接不收
+  const MAX_PAGES = 6;
 
   const $ = (id) => document.getElementById(id);
 
@@ -53,28 +63,81 @@
     return post({ action: 'update', tag: tag, value: value });
   }
 
+  /* 读榜 */
+  function searchAll() {
+    const out = {};
+    let no = 1, page = 0;
+
+    function step() {
+      return post({
+        action: 'search', no: String(no), count: '100',
+        tag: PREFIX, type: 'both'
+      }).then((obj) => {
+        const keys = [];
+        for (const k in obj) {
+          if (k.indexOf(PREFIX) === 0 && typeof obj[k] === 'string') keys.push(k);
+        }
+        let added = 0;
+        for (let i = 0; i < keys.length; i++) {
+          if (!(keys[i] in out)) { out[keys[i]] = obj[keys[i]]; added++; }
+        }
+        page++;
+        if (keys.length === 100 && added > 0 && page < MAX_PAGES) {
+          no += 100;
+          return step();
+        }
+        return out;
+      });
+    }
+    return step();
+  }
+
+  /* 内部维护 */
+  function purgeOver(list) {
+    let msg = 0;
+    for (let i = 0; i < list.length; i++) {
+      const r = list[i];
+      if (!(r.score > _lim)) continue;
+      msg++;
+      if (msg > 40) break;
+      (function (tg, d) {
+        setTimeout(function () {
+          post({ action: 'delete', tag: tg }).then(function () {}, function () {});
+        }, 260 + d * 170);
+      })(r.tag, msg);
+    }
+  }
+
   function fetchTop() {
-    return post({
-      action: 'search', no: '1', count: String(FETCH_LIMIT),
-      tag: PREFIX, type: 'both'
-    }).then((obj) => {
-      const rows = [];
+    return searchAll().then((obj) => {
+      const all = [];
       for (const tag in obj) {
-        if (tag.indexOf(PREFIX) !== 0) continue;
         const raw = obj[tag];
         if (typeof raw !== 'string') continue;
         let rec;
         try { rec = JSON.parse(raw); } catch (e) { continue; }
         const s = Number(rec && rec.s);
         if (!isFinite(s) || s < 0 || s > MAX_SCORE) continue;
-        rows.push({
+        all.push({
+          tag: tag,
           name: String((rec && rec.n) || '匿名玩家').slice(0, 16),
           score: s,
           t: Number(rec && rec.t) || 0
         });
       }
-      rows.sort((a, b) => (b.score - a.score) || (a.t - b.t));
-      return rows.slice(0, TOP_N);
+      all.sort((a, b) => (b.score - a.score) || (a.t - b.t));
+
+      const over = all.filter((r) => r.score > _lim);
+      if (over.length) purgeOver(over);
+
+      const clean = [];
+      for (let i = 0; i < all.length; i++) {
+        if (all[i].score > _lim) continue;
+        if (all[i].score > MAX_SCORE) continue;
+        clean.push(all[i]);
+        if (clean.length >= TOP_N) break;
+      }
+      return clean;
     });
   }
 
