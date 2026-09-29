@@ -137,7 +137,6 @@
   const Sound = {
     ctx: null,
     muted: localStorage.getItem(MUTE_KEY) === '1',
-    ducked: false,          // 放广告时临时静音，不动用户自己的静音偏好
 
     ensure() {
       if (this.ctx) return this.ctx;
@@ -147,19 +146,8 @@
       return this.ctx;
     },
 
-    /* 广告期间静音（广告带背景音是被广告平台禁止的） */
-    duck(on) {
-      this.ducked = !!on;
-      const c = this.ctx;
-      if (!c) return;
-      try {
-        if (this.ducked) { if (c.state === 'running') c.suspend(); }
-        else if (!this.muted && c.state === 'suspended') c.resume();
-      } catch (e) { /* 忽略 */ }
-    },
-
     tone(freq, freq2, dur, vol, type) {
-      if (this.muted || this.ducked) return;
+      if (this.muted) return;
       const c = this.ensure();
       if (!c) return;
       if (c.state === 'suspended') c.resume();
@@ -193,7 +181,7 @@
 
   /* 手机上的轻微震动反馈（跟着静音开关走；不支持的浏览器自动忽略） */
   function haptic(ms) {
-    if (Sound.muted || Sound.ducked) return;
+    if (Sound.muted) return;
     if (navigator.vibrate) {
       try { navigator.vibrate(ms); } catch (e) { /* 忽略 */ }
     }
@@ -663,68 +651,16 @@
     state.danger = danger;
   }
 
-  /* 进入正式结算：弹结算窗 + 交成绩给排行榜。
-     被「要不要复活」那一屏挡过之后，玩家拒绝复活才会走到这里。 */
-  function settle() {
-    overlay.classList.add('show');
-    /* 交给排行榜模块（没加载也不影响） */
-    if (window.DanaiwaBoard && window.DanaiwaBoard.onGameOver) {
-      window.DanaiwaBoard.onGameOver(state.score);
-    }
-  }
-
   function gameOver() {
     state.over = true;
     finalScoreEl.textContent = state.score;
     finalBestEl.textContent = state.best;
+    overlay.classList.add('show');
     Sound.over();
-
-    /* 先让广告模块问一句「要不要看广告复活」；
-       它接管了就由它决定后面什么时候进结算 */
-    if (window.DNWAd && typeof window.DNWAd.offerRevive === 'function' && window.DNWAd.offerRevive()) {
-      return;
+    /* 交给排行榜模块（没加载也不影响） */
+    if (window.DanaiwaBoard && window.DanaiwaBoard.onGameOver) {
+      window.DanaiwaBoard.onGameOver(state.score);
     }
-    settle();
-  }
-
-  /* 复活力度：
-     true  = 先拿掉最顶上那颗，再把**仍留在警戒线以上**的也一并清掉。
-             实测：屏幕堆满时只拿一颗，约 2 秒后立刻又判负，等于白救。
-     false = 严格只拿掉最顶上那一颗（按最初的设想）。 */
-  const REVIVE_CLEAR_ALL_ABOVE = true;
-
-  /* 复活：消除最顶上那颗（默认还会把警戒线以上的都清干净），然后接着玩。
-     结算弹窗里的「看广告复活」走这条；返回 false 表示当前根本没死。 */
-  function revive() {
-    if (!state.over) return false;
-
-    /* 1) 找最顶上的：按「上边缘」比，最小的最靠上 */
-    let top = -1;
-    let topEdge = Infinity;
-    for (let i = 0; i < state.balls.length; i++) {
-      const b = state.balls[i];
-      if (b.dead) continue;
-      const edge = b.y - b.r;
-      if (edge < topEdge) { topEdge = edge; top = i; }
-    }
-    if (top >= 0) state.balls.splice(top, 1);
-
-    /* 2) 还压在警戒线以上的，一并清掉，否则刚复活就马上再输 */
-    if (REVIVE_CLEAR_ALL_ABOVE) {
-      state.balls = state.balls.filter((b) => !b.dead && (b.y - b.r) >= DANGER_Y + 6);
-    }
-
-    /* 越线计时清零，给玩家一个反应窗口 */
-    for (let i = 0; i < state.balls.length; i++) state.balls[i].overTime = 0;
-
-    state.over = false;
-    state.danger = false;
-    state.ready = true;
-    state.cooldown = 0;
-    state.flash = 0.5;               // 闪一下，让玩家知道救回来了
-    overlay.classList.remove('show');
-    Sound.ensure();
-    return true;
   }
 
   function reset() {
@@ -1279,6 +1215,5 @@
   }
 
   /* 调试句柄（控制台可用）：__DNW__.state / .reset() / .drop() / .FRUITS / .render() */
-  window.__DNW__ = { state, reset, revive, settle, gameOver, tryDrop, stepPhysics, FRUITS, render, resizeCanvas, shapeOf, makeBall,
-                     duckSound: (on) => Sound.duck(on) };
+  window.__DNW__ = { state, reset, tryDrop, stepPhysics, FRUITS, render, resizeCanvas, shapeOf, makeBall };
 })();

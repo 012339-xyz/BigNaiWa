@@ -24,41 +24,24 @@
 
     <div class="overlay" id="overlay">
       <div class="dialog">
+        <div class="dialog-emoji">🍉</div>
+        <h2 id="overTitle">游戏结束</h2>
+        <p class="dialog-score">本局得分 <strong id="finalScore">0</strong></p>
+        <p class="dialog-best">最高分 <span id="finalBest">0</span></p>
 
-        <!-- ===== 第一屏：越线之后先问要不要救 ===== -->
-        <div class="revive-ask" id="revivePrompt" hidden>
-          <div class="dialog-emoji">😵</div>
-          <h2>还能再救一下</h2>
-          <p class="dialog-score">本局得分 <strong id="reviveScore">0</strong></p>
-          <p class="revive-hint" id="reviveHint">看一段广告，消除最顶上那颗水果，接着玩</p>
-          <div class="dialog-actions">
-            <button class="btn" id="giveUpBtn" type="button">不了，结束吧</button>
-            <button class="btn btn-ad" id="reviveBtn" type="button">📺 看广告复活</button>
-          </div>
+        <div class="submit-box" id="submitBox">
+          <p class="submit-msg" id="submitMsg">正在结算…</p>
+          <p class="my-name">昵称：<strong id="myNameLabel">默认用户</strong>
+            <button class="link-btn" id="editNameBtn" type="button">改昵称</button>
+          </p>
+          <button class="btn" id="submitBtn" type="button" hidden>重试提交</button>
         </div>
 
-        <!-- ===== 第二屏：正式结算 ===== -->
-        <div id="overPanel">
-          <div class="dialog-emoji">🍉</div>
-          <h2 id="overTitle">游戏结束</h2>
-          <p class="dialog-score">本局得分 <strong id="finalScore">0</strong></p>
-          <p class="dialog-best">最高分 <span id="finalBest">0</span></p>
-
-          <div class="submit-box" id="submitBox">
-            <p class="submit-msg" id="submitMsg">正在结算…</p>
-            <p class="my-name">昵称：<strong id="myNameLabel">默认用户</strong>
-              <button class="link-btn" id="editNameBtn" type="button">改昵称</button>
-            </p>
-            <button class="btn" id="submitBtn" type="button" hidden>重试提交</button>
-          </div>
-
-          <div class="dialog-actions">
-            <button class="btn" id="boardBtn2" type="button">🏆 排行榜</button>
-            <button class="btn btn-primary" id="restartBtn" type="button">再来一局</button>
-          </div>
-          <p class="dialog-hint">按 R 键也可重新开始</p>
+        <div class="dialog-actions">
+          <button class="btn" id="boardBtn2" type="button">🏆 排行榜</button>
+          <button class="btn btn-primary" id="restartBtn" type="button">再来一局</button>
         </div>
-
+        <p class="dialog-hint">按 R 键也可重新开始</p>
       </div>
     </div>
   </section>
@@ -138,6 +121,5 @@
 <script src="game.js"></script>
 <!-- 排行榜 -->
 <script src="leaderboard.min.js"></script>
-<!-- 页面不挂任何广告 SDK（2026-09-29 全部撤除）。恢复方法见 README「广告位」一节。 -->
 </body>
 </html>
