@@ -92,7 +92,7 @@ python -m http.server 8080
 | `index.html` | 页面结构：棋盘、结束遮罩、侧边面板、排行榜弹窗 |
 | `style.css` | 全部样式：玻璃拟态面板、响应式布局、结束动画、排行榜 |
 | `game.js` | 游戏逻辑 + 自研物理 + Canvas 渲染 + WebAudio 音效 |
-| `leaderboard.js` | 在线排行榜（TinyWebDB 接口 + 弹窗渲染） |
+| `leaderboard.min.js` | 在线排行榜的构建产物（TinyWebDB 接口 + 弹窗渲染），页面直接引用它 |
 | `assets/fruits/` | 11 张统一后的水果贴图（512×512 PNG，透明底）+ `parts.js` 碰撞形状 |
 | `tools/normalize_assets.py` | 素材统一脚本：抠底、去噪、统一画布、烤暗边 |
 | `tools/build_parts.py` | 按贴图轮廓生成碰撞形状，产出 `assets/fruits/parts.js` |
@@ -109,13 +109,15 @@ python -m http.server 8080
 | 项 | 值 |
 | --- | --- |
 | 接口 | `POST https://tinywebdb.appinventor.space/api` |
-| 账号 | `user` / `secret` 写在 `leaderboard.js` 顶部（构建后只以编码形式存在于 `leaderboard.min.js`） |
-| 用到的 action | `update`（写）、`search`（按 tag 前缀读）、`delete`（删） |
+| 账号 | `user` / `secret` 以编码形式存在，运行时还原 |
+| 用到的 action | `update`（写）、`search`（按 tag 前缀读） |
 | tag | `dnw_<时间戳36进制>_<随机4位>` |
 | value | `{"n":"昵称","s":分数,"t":时间戳}` |
 
-读榜就是 `action=search&tag=dnw_&type=both&count=100`，拿回一个 `{tag: value}` 的字典，
-本地 `JSON.parse` 后按分数排序取前 20。
+**榜单内容 = 最近 20 次提交**。服务端按提交时间倒序返回，所以只要拿最新两页
+（`no=1` 和 `no=101`）就够覆盖这 20 条，再多请求也没意义；取回来之后在窗口内按分数排名展示。
+这个设计的用意是：**榜单是一条滚动的时间窗，不是历史最高分榜**——分数只在自己还在窗口里的
+那段时间有效，后来的人会不断把你挤出去，所以卡在榜首或者长期占位没有意义。
 
 ```js
 // 提交
@@ -123,18 +125,19 @@ POST user=<你的 user>&secret=<你的 secret>&action=update
      &tag=dnw_mukuffr8_435q
      &value={"n":"奶娃大王","s":4321,"t":1759000000000}
 
-// 读榜
+// 读榜（只要最新两页）
 POST user=<你的 user>&secret=<你的 secret>&action=search&no=1&count=100&tag=dnw_&type=both
 → {"dnw_mukuffr8_435q":"{\"n\":\"奶娃大王\",\"s\":4321,\"t\":1759000000000}"}
 ```
 
 **结算流程**（打完自动上榜，不需要手动点提交）：
 
-1. 游戏结束 → 先读榜，判断这局分数够不够上榜
-   （榜没满 20 条都能进；满了要 `>=` 最后一名）；
-2. 够 → 自动提交，昵称取 `localStorage` 里存的，**没填就用「默认用户」**；
-3. 不够 → 只提示「没进前 20」，不写库，避免把库塞满小分数；
-4. 读榜就失败（断网）→ 不盲目写库，显示错误并给一个「重试提交」按钮。
+1. 游戏结束 → 直接提交，昵称取 `localStorage` 里存的，**没填就用「默认用户」**；
+2. 提交成功 → 重新读一次榜单，把窗口内的排名显示出来；
+3. 提交失败 → 显示错误并给一个「重试提交」按钮。
+
+排行榜从头到尾**只写自己那条记录，不读也不动别人的数据**：没有任何 `delete`，
+旧成绩是自然被挤出时间窗的，不是被清掉的。
 
 昵称在排行榜弹窗顶部的「我的昵称」里随时能改（`change` / `blur` / 回车时落盘）。
 
@@ -144,11 +147,13 @@ POST user=<你的 user>&secret=<你的 secret>&action=search&no=1&count=100&tag=
 - **防手抖**：自动提交时校验「两次提交至少间隔 3 秒」，0 分不上榜，
   分数明显离谱（> 99999999）的不收；
 - **不抢按键**：焦点在输入框里时，`game.js` 的键盘处理直接让路（不然打字会掉水果）；
-- **容错**：网络不通只是排行榜打不开，游戏照常玩；返回不是 JSON 会给出可读的错误提示；
+- **容错**：网络不通只是排行榜打不开，游戏照常玩；接口偶发 502 会自动重试一次；
+  返回不是 JSON 会给出可读的错误提示；
 - **XSS**：榜单全部用 `textContent` 渲染，不拼 HTML；
-- 接口单次最多返回 100 条，所以榜单是「最近 100 条里排前 20」，弹窗底部有标注。
+- 榜单是最近 20 次提交（最新两页足够覆盖），弹窗底部有标注。
 
-换账号：改 `leaderboard.js` 顶部的 `USER` / `SECRET` / `PREFIX` 即可（换 `PREFIX` 相当于另开一个榜）。
+换账号：改排行榜源码顶部的 `USER` / `SECRET` / `PREFIX` 即可，改完跑一遍构建脚本产出
+`leaderboard.min.js`（换 `PREFIX` 相当于另开一个榜）。
 
 ## 碰撞形状（不是圆）
 
