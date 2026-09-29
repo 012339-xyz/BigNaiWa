@@ -124,6 +124,8 @@
     const orig = B.onGameOver;
     B.onGameOver = function () {
       games++;
+      /* SDK 是异步来的，而且不一定什么时候到；结算时再确认一次按钮 */
+      setTimeout(syncReviveBtn, 900);
       if (INTERSTITIAL_EVERY > 0 && games % INTERSTITIAL_EVERY === 0) interstitial();
       try { return orig.apply(this, arguments); } catch (e) { return undefined; }
     };
@@ -149,15 +151,17 @@
 
   function boot() {
     bind();
-    /* SDK 是异步加载的，隔一小会儿看一次；找不到就一直不显示按钮 */
+    /* SDK 是异步加载的，而且不一定马上到（实测同一个 tag 有时几秒有时十几秒），
+       所以这里一直轻量地看；一旦发现就停。每隔 1.5 秒看一次 window 的键，开销可忽略。 */
     let tries = 0;
     const timer = setInterval(function () {
       tries++;
       wrapGameOver();
-      if (ready() || tries > 20) clearInterval(timer);
+      if (ready() || tries > 120) clearInterval(timer);
       syncReviveBtn();
-    }, 500);
+    }, 1500);
     window.addEventListener('load', syncReviveBtn);
+    document.addEventListener('visibilitychange', syncReviveBtn);
   }
 
   /* 给别处留的钩子（控制台调试用） */
