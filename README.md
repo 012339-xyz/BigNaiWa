@@ -141,6 +141,33 @@ POST user=<你的 user>&secret=<你的 secret>&action=search&no=1&count=100&tag=
 
 昵称在排行榜弹窗顶部的「我的昵称」里随时能改（`change` / `blur` / 回车时落盘）。
 
+## 广告位
+
+**页面上目前不挂任何广告 SDK。** 2026-09-29 把之前试过的全部撤掉了，原因是实测下来
+那几类格式对全屏 Canvas 游戏都是负收益：
+
+| 试过的格式 | 实测行为 | 结论 |
+| --- | --- | --- |
+| Monetag Vignette | 全屏 `position:fixed` + `z-index:2147483647` 的 iframe，素材是「您是真人吗」假人机验证、飞鸟VPN 翻墙推广 | 盖住整个棋盘，撤掉 |
+| Monetag OnClick / Direct Link | 铺一层看不见的全屏点击层，玩家点一下屏幕就弹一个新标签页 | 对「点一下投一个水果」是致命的，撤掉 |
+| Monetag In-Page Push / Push | 组合（MULTI）标签会连带把上面两个一起拉起来 | 无法单独使用，撤掉 |
+| GameDistribution | 有真正的激励视频，且有 `SDK_REWARDED_WATCH_COMPLETE` 看完回调 | **唯一可做的正路**，但国内网页流量填充率低 |
+
+**「看广告复活」的代码还在仓库里没删**，只是不再加载：
+
+- `ad.js`：两段式弹窗 + 广告门槛。用 `REQUIRE_AD = true` 控制「拿不到广告就不给复活」；
+  支持两种 SDK —— GameDistribution（`gdsdk.showAd('rewarded')`，**只认看完事件**）
+  和 Monetag 风格的 `show_<zoneId>`
+- `game.js` 的 `revive()`：消除警戒线以上的水果（`REVIVE_CLEAR_ALL_ABOVE` 可切回只删一个）
+- `ad.test.js`：52 项自检，含「广告被跳过就不给复活」
+
+想重新启用：在 `index.html` 里加回 `<script src="ad.js"></script>`，并按平台要求引入 SDK
+（GameDistribution 需要在页面加载时就引入 `https://html5.api.gamedistribution.com/main.min.js`
+并设置 `GD_OPTIONS.gameId`，同时把它转发的 `onEvent` 接到 `DNWAd.onAdEvent`）。
+没有 SDK 时 `ad.js` 什么都不显示、不影响游戏。
+
+`sw.js`（广告平台的站点验证文件）也已从本仓库和 `yhsome.github.io` 仓库一并删除。
+
 实现上的几个小处理：
 
 - **昵称**存 `localStorage`（`danaiwa.name`），去掉控制字符、限长 12 字，空串一律当「默认用户」；
