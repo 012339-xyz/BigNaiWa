@@ -663,6 +663,39 @@
     }
   }
 
+  /* 复活：把警戒线上方的球全清掉，把局面捞回来接着玩。
+     结算弹窗里的「看广告复活」走这条；返回 false 表示当前根本没死。 */
+  function revive() {
+    if (!state.over) return false;
+
+    let cleared = 0;
+    state.balls = state.balls.filter((b) => {
+      if (b.dead) return false;
+      if (b.y - b.r < DANGER_Y + 12) { cleared++; return false; }
+      return true;
+    });
+
+    /* 兜底：线上已经没东西了（判负后又被弹回去的情况），拿掉最高的那颗 */
+    if (!cleared && state.balls.length) {
+      let top = 0;
+      for (let i = 1; i < state.balls.length; i++) {
+        if (state.balls[i].y < state.balls[top].y) top = i;
+      }
+      state.balls.splice(top, 1);
+    }
+
+    /* 越线计时清零，免得刚复活马上又被判负 */
+    for (let i = 0; i < state.balls.length; i++) state.balls[i].overTime = 0;
+
+    state.over = false;
+    state.danger = false;
+    state.ready = true;
+    state.cooldown = 0;
+    overlay.classList.remove('show');
+    Sound.ensure();
+    return true;
+  }
+
   function reset() {
     state.balls.length = 0;
     state.particles.length = 0;
@@ -1215,5 +1248,5 @@
   }
 
   /* 调试句柄（控制台可用）：__DNW__.state / .reset() / .drop() / .FRUITS / .render() */
-  window.__DNW__ = { state, reset, tryDrop, stepPhysics, FRUITS, render, resizeCanvas, shapeOf, makeBall };
+  window.__DNW__ = { state, reset, revive, tryDrop, stepPhysics, FRUITS, render, resizeCanvas, shapeOf, makeBall };
 })();

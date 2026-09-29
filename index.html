@@ -9,6 +9,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="合成大奶娃">
 <meta name="description" content="合成大奶娃 · 纯前端小游戏：拖动瞄准、松手投放，相同的撞在一起合成更大的一只。">
+<!-- ↓ Monetag 站点验证：把后台给的 meta 标签粘在下面这一行 ↓ -->
+
 <title>合成大奶娃</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -36,6 +38,7 @@
         </div>
 
         <div class="dialog-actions">
+          <button class="btn btn-ad" id="reviveBtn" type="button" hidden>📺 看广告复活</button>
           <button class="btn" id="boardBtn2" type="button">🏆 排行榜</button>
           <button class="btn btn-primary" id="restartBtn" type="button">再来一局</button>
         </div>
@@ -119,5 +122,9 @@
 <script src="game.js"></script>
 <!-- 排行榜 -->
 <script src="leaderboard.min.js"></script>
+<!-- ===== 广告 SDK（Monetag，zone 11921086）=====
+     加载失败 / 被拦截 = 没有广告，游戏照常跑，「看广告复活」按钮也不会出现。 -->
+<script src="https://5gvci.com/act/files/tag.min.js?z=11921086" data-cfasync="false" async></script>
+<script src="ad.js"></script>
 </body>
 </html>
