@@ -93,6 +93,7 @@ python -m http.server 8080
 | `style.css` | 全部样式：玻璃拟态面板、响应式布局、结束动画、排行榜 |
 | `game.js` | 游戏逻辑 + 自研物理 + Canvas 渲染 + WebAudio 音效 |
 | `leaderboard.min.js` | 在线排行榜的构建产物（TinyWebDB 接口 + 弹窗渲染），页面直接引用它 |
+| `sponsor.js` | 结算页「赞助作者」弹窗（展示微信收款码），纯静态、无网络请求 |
 | `assets/fruits/` | 11 张统一后的水果贴图（512×512 PNG，透明底）+ `parts.js` 碰撞形状 |
 | `tools/normalize_assets.py` | 素材统一脚本：抠底、去噪、统一画布、烤暗边 |
 | `tools/build_parts.py` | 按贴图轮廓生成碰撞形状，产出 `assets/fruits/parts.js` |
