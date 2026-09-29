@@ -21,7 +21,14 @@
 
   const REVIVE_PER_GAME = 1;      // 一局最多复活几次（防刷）
   const INTERSTITIAL_EVERY = 3;   // 每几局弹一次插屏；填 0 关闭插屏
-  const REWARD_TIMEOUT = 60000;   // 激励视频最长等多久（毫秒），超时当没看成
+  const REWARD_TIMEOUT = 60000;   // 广告最长等多久（毫秒），超时当没看成
+
+  /* 复活要不要真的先过一遍广告？
+   *   false（当前）= 没有可用广告时，点一下直接复活 —— 功能先能用上；
+   *                  有可用广告时依然会先播广告，播完才给复活。
+   *   true         = 严格模式：拿不到广告就**不给**复活，按钮也不出现。
+   *                 等你后台有真正能调用的广告位了，把这个改成 true 即可。 */
+  const REQUIRE_AD = false;
 
   /* ---------------- ADAPTER（按需改这一段） ----------------
    * Monetag 的 SDK 加载后会在 window 上挂一个 show_<zoneId> 函数。
@@ -77,31 +84,39 @@
 
   function el(id) { return document.getElementById(id); }
 
-  /* 按钮只在「真的有广告可用」时才出现 */
+  /* 复活按钮：按钮本身在结算弹窗里（只有结束时才看得到），
+     这里只决定「还有没有名额」以及「标签写什么」——
+     有真广告就写「看广告复活」，没有就写「复活一次」，不骗玩家。 */
   function syncReviveBtn() {
     const btn = el('reviveBtn');
     if (!btn) return;
-    const show = ready() && revivedThisGame < REVIVE_PER_GAME;
+    const ad = ready();
+    const show = revivedThisGame < REVIVE_PER_GAME && (ad || !REQUIRE_AD);
     btn.hidden = !show;
+    if (!show) return;
+    btn.textContent = ad ? '📺 看广告复活' : '🔄 复活一次';
+    btn.title = ad ? '看完广告，消除最顶上那颗水果' : '消除最顶上那颗水果（一局限一次）';
   }
 
   function onReviveClick() {
     if (busy) return;
     if (revivedThisGame >= REVIVE_PER_GAME) return;
 
+    const g = window.__DNW__;
+    if (!g || typeof g.revive !== 'function') return;
+
     busy = true;
     const btn = el('reviveBtn');
     if (btn) btn.disabled = true;
 
-    rewarded().then(function (ok) {
+    /* 有广告就先播广告；没有广告（且不是严格模式）就直接放行 */
+    const gate = sdk() ? rewarded() : Promise.resolve(!REQUIRE_AD);
+
+    gate.then(function (ok) {
       busy = false;
       if (btn) btn.disabled = false;
       if (!ok) { syncReviveBtn(); return; }
-
-      const g = window.__DNW__;
-      if (!g || typeof g.revive !== 'function') { syncReviveBtn(); return; }
       if (!g.revive()) { syncReviveBtn(); return; }
-
       revivedThisGame++;
       syncReviveBtn();
     }, function () {
@@ -151,6 +166,9 @@
 
   function boot() {
     bind();
+    /* 立刻包一层（排行榜脚本在本文件之前加载，这时它已经在了），
+       免得页面刚打开就结束的第一局漏掉结算钩子 */
+    wrapGameOver();
     /* SDK 是异步加载的，而且不一定马上到（实测同一个 tag 有时几秒有时十几秒），
        所以这里一直轻量地看；一旦发现就停。每隔 1.5 秒看一次 window 的键，开销可忽略。 */
     let tries = 0;

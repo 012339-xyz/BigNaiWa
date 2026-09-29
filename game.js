@@ -663,28 +663,25 @@
     }
   }
 
-  /* 复活：把警戒线上方的球全清掉，把局面捞回来接着玩。
-     结算弹窗里的「看广告复活」走这条；返回 false 表示当前根本没死。 */
+  /* 复活：只消除**最顶上那一个**球，然后接着玩。
+     结算弹窗里的「看广告复活」走这条；返回 false 表示当前根本没死。
+     注意：只拿掉一个，如果堆得还高，剩下的球仍在线上，玩家得赶紧操作，
+     否则约 OVER_LIMIT 秒后还是会再判负 —— 这是刻意的，复活不是免死。 */
   function revive() {
     if (!state.over) return false;
 
-    let cleared = 0;
-    state.balls = state.balls.filter((b) => {
-      if (b.dead) return false;
-      if (b.y - b.r < DANGER_Y + 12) { cleared++; return false; }
-      return true;
-    });
-
-    /* 兜底：线上已经没东西了（判负后又被弹回去的情况），拿掉最高的那颗 */
-    if (!cleared && state.balls.length) {
-      let top = 0;
-      for (let i = 1; i < state.balls.length; i++) {
-        if (state.balls[i].y < state.balls[top].y) top = i;
-      }
-      state.balls.splice(top, 1);
+    /* 找最顶上的：按「上边缘」比，最小的最靠上 */
+    let top = -1;
+    let topEdge = Infinity;
+    for (let i = 0; i < state.balls.length; i++) {
+      const b = state.balls[i];
+      if (b.dead) continue;
+      const edge = b.y - b.r;
+      if (edge < topEdge) { topEdge = edge; top = i; }
     }
+    if (top >= 0) state.balls.splice(top, 1);
 
-    /* 越线计时清零，免得刚复活马上又被判负 */
+    /* 越线计时清零，给玩家一个反应窗口 */
     for (let i = 0; i < state.balls.length; i++) state.balls[i].overTime = 0;
 
     state.over = false;
