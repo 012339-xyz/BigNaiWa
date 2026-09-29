@@ -13,12 +13,17 @@
 
 <title>合成大奶娃</title>
 <link rel="stylesheet" href="style.css">
-<!-- ===== 广告：Vignette banner（Monetag zone 11921268）=====
-     实测形态（2026-09-29，真实浏览器）：全屏 fixed 遮罩 + z-index 2147483647
-     的 iframe，里面是「您是真人吗？需要验证身份以继续访问」的诱导点击卡片，
-     会盖住整个棋盘。应站主要求按官方原样启用。
-     加载失败 / 被拦截 = 没有广告，游戏照常跑。 -->
-<script>(function(s){s.dataset.zone='11921268',s.src='https://n6wxm.com/vignette.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>
+<!-- ===== 广告位：In-Page Push（Monetag zone 288723）=====
+     页面内原生横幅：不劫持点击、不占布局空间，是全屏 Canvas 游戏里最温和的形态。
+     加载失败 / 被拦截 = 没有广告，游戏照常跑，不影响任何功能。
+
+     ===== 曾经用过的 Vignette（zone 11921268）=====
+     它就是「开屏广告」：实测渲染成 全屏 fixed 遮罩 + z-index 2147483647 的 iframe，
+     素材是「您是真人吗？需要验证身份以继续访问」假验证、以及飞鸟VPN 翻墙推广
+     这类诱导点击内容，开局把整个棋盘盖住。
+     2026-09-29 应站主要求撤下。要重新启用就把下面那行注释标记去掉。 -->
+<script src="https://quge5.com/88/tag.min.js" data-zone="288723" async data-cfasync="false"></script>
+<!-- <script>(function(s){s.dataset.zone='11921268',s.src='https://n6wxm.com/vignette.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script> -->
 </head>
 <body>
 
