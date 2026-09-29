@@ -126,6 +126,18 @@ const ball = (y, r) => ({ x: 200, y, r: r || 30, dead: false, landed: true, over
   eq(A.G.revive(), true, '空场也能复活（不报错）');
   eq(A.G.state.balls.length, 0, '空场没有球可拿');
 
+  /* 屏幕上还压着好几颗的情况：只拿一颗会立刻再判负（实测 2 秒后就又输），
+     所以警戒线以上的要一起清掉 */
+  const A2 = setup(false);
+  A2.G.state.balls = [ball(660), ball(600), ball(120), ball(200), ball(100)];
+  A2.G.state.over = true;
+  A2.G.state.danger = true;
+  eq(A2.G.revive(), true, '满屏时也能复活');
+  eq(A2.G.state.balls.length, 3, '最顶上的 + 还压在线上的一起被清掉');
+  ok(A2.G.state.balls.every((b) => b.y - b.r >= 148), '留下来的全都退到警戒线以下');
+  eq(A2.G.state.danger, false, 'danger 复位');
+  ok(A2.G.state.balls.every((b) => b.overTime === 0), '越线计时清零');
+
   /* ---------- B. 没有广告 ---------- */
   console.log('\n[B] 没有广告 SDK（REQUIRE_AD=false）');
   const B = setup(false);

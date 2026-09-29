@@ -663,14 +663,18 @@
     }
   }
 
-  /* 复活：只消除**最顶上那一个**球，然后接着玩。
-     结算弹窗里的「看广告复活」走这条；返回 false 表示当前根本没死。
-     注意：只拿掉一个，如果堆得还高，剩下的球仍在线上，玩家得赶紧操作，
-     否则约 OVER_LIMIT 秒后还是会再判负 —— 这是刻意的，复活不是免死。 */
+  /* 复活力度：
+     true  = 先拿掉最顶上那颗，再把**仍留在警戒线以上**的也一并清掉。
+             实测：屏幕堆满时只拿一颗，约 2 秒后立刻又判负，等于白救。
+     false = 严格只拿掉最顶上那一颗（按最初的设想）。 */
+  const REVIVE_CLEAR_ALL_ABOVE = true;
+
+  /* 复活：消除最顶上那颗（默认还会把警戒线以上的都清干净），然后接着玩。
+     结算弹窗里的「看广告复活」走这条；返回 false 表示当前根本没死。 */
   function revive() {
     if (!state.over) return false;
 
-    /* 找最顶上的：按「上边缘」比，最小的最靠上 */
+    /* 1) 找最顶上的：按「上边缘」比，最小的最靠上 */
     let top = -1;
     let topEdge = Infinity;
     for (let i = 0; i < state.balls.length; i++) {
@@ -681,6 +685,11 @@
     }
     if (top >= 0) state.balls.splice(top, 1);
 
+    /* 2) 还压在警戒线以上的，一并清掉，否则刚复活就马上再输 */
+    if (REVIVE_CLEAR_ALL_ABOVE) {
+      state.balls = state.balls.filter((b) => !b.dead && (b.y - b.r) >= DANGER_Y + 6);
+    }
+
     /* 越线计时清零，给玩家一个反应窗口 */
     for (let i = 0; i < state.balls.length; i++) state.balls[i].overTime = 0;
 
@@ -688,6 +697,7 @@
     state.danger = false;
     state.ready = true;
     state.cooldown = 0;
+    state.flash = 0.5;               // 闪一下，让玩家知道救回来了
     overlay.classList.remove('show');
     Sound.ensure();
     return true;
