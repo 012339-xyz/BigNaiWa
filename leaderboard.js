@@ -22,7 +22,7 @@
   var USER = _x('3e5dff46334bf0');
   var SECRET = _x('6c5aa4156f0da944');
   var PREFIX = _x('3e52e678');
-  var _lim = parseInt(_x('680ca1176a'), 10);
+  var _lim = parseInt(_x('6204a510'), 10);
 
   const TOP_N = 20;                 // 榜单只展示前 20
   const NAME_KEY = 'danaiwa.name';
