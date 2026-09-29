@@ -137,6 +137,7 @@
   const Sound = {
     ctx: null,
     muted: localStorage.getItem(MUTE_KEY) === '1',
+    ducked: false,          // 放广告时临时静音，不动用户自己的静音偏好
 
     ensure() {
       if (this.ctx) return this.ctx;
@@ -146,8 +147,19 @@
       return this.ctx;
     },
 
+    /* 广告期间静音（广告带背景音是被广告平台禁止的） */
+    duck(on) {
+      this.ducked = !!on;
+      const c = this.ctx;
+      if (!c) return;
+      try {
+        if (this.ducked) { if (c.state === 'running') c.suspend(); }
+        else if (!this.muted && c.state === 'suspended') c.resume();
+      } catch (e) { /* 忽略 */ }
+    },
+
     tone(freq, freq2, dur, vol, type) {
-      if (this.muted) return;
+      if (this.muted || this.ducked) return;
       const c = this.ensure();
       if (!c) return;
       if (c.state === 'suspended') c.resume();
@@ -181,7 +193,7 @@
 
   /* 手机上的轻微震动反馈（跟着静音开关走；不支持的浏览器自动忽略） */
   function haptic(ms) {
-    if (Sound.muted) return;
+    if (Sound.muted || Sound.ducked) return;
     if (navigator.vibrate) {
       try { navigator.vibrate(ms); } catch (e) { /* 忽略 */ }
     }
@@ -1267,5 +1279,6 @@
   }
 
   /* 调试句柄（控制台可用）：__DNW__.state / .reset() / .drop() / .FRUITS / .render() */
-  window.__DNW__ = { state, reset, revive, settle, gameOver, tryDrop, stepPhysics, FRUITS, render, resizeCanvas, shapeOf, makeBall };
+  window.__DNW__ = { state, reset, revive, settle, gameOver, tryDrop, stepPhysics, FRUITS, render, resizeCanvas, shapeOf, makeBall,
+                     duckSound: (on) => Sound.duck(on) };
 })();

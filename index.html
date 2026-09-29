@@ -32,6 +32,29 @@
      重新启用就把下面那行的注释标记去掉。 -->
 <!-- <script src="https://quge5.com/88/tag.min.js" data-zone="288723" async data-cfasync="false"></script> -->
 
+<!-- ===== 广告 SDK =====
+     现在页面上**没有挂任何广告 SDK**，所以「看广告复活」不会出现（REQUIRE_AD = true）。
+     拿到 GameDistribution 的 gameId 之后，把下面整段取消注释、把 GAME_ID_HERE 换掉即可 ——
+     ad.js 会自动检测到 gdsdk 并把复活按钮放出来，不需要改别的代码。
+
+     注意：SDK 必须在页面加载时就引入（官方要求），不要等点了按钮才加载。
+<script>
+  window.GD_OPTIONS = {
+    gameId: "GAME_ID_HERE",
+    onEvent: function (e) {
+      if (window.DNWAd && window.DNWAd.onAdEvent) window.DNWAd.onAdEvent(e);
+    }
+  };
+  (function (d, s, id) {
+    var js, fjs = d.getElementsByTagName(s)[0];
+    if (d.getElementById(id)) return;
+    js = d.createElement(s); js.id = id;
+    js.src = 'https://html5.api.gamedistribution.com/main.min.js';
+    fjs.parentNode.insertBefore(js, fjs);
+  }(document, 'script', 'gamedistribution-jssdk'));
+</script>
+-->
+
 <!-- 早先的 Push Notifications 标签（zone 11921086）已经挪到页面底部、紧挨 ad.js 那一处，
      这里不再重复挂 —— 同一个 tag 出现两次会重复请求、容易被判重复展示。 -->
 

@@ -33,12 +33,27 @@
    * 严格模式下的复活入口不会出现。 */
   const REQUIRE_AD = true;
 
-  /* ---------------- ADAPTER（按需改这一段） ----------------
-   * Monetag 的 SDK 加载后会在 window 上挂一个 show_<zoneId> 函数。
-   * 这里不写死 zone，扫出来用 —— 以后换号换 zone 不用改代码。
-   * 调用约定若与你后台给的文档不一致，只改下面两个函数即可。
+  /* ---------------- ADAPTER ----------------
+   * 支持两种广告 SDK，谁在就跑谁：
+   *
+   *  1) GameDistribution（推荐，有真正的激励视频 + 看完回调）
+   *     全局 window.gdsdk，调用 gdsdk.showAd('rewarded') 返回 Promise；
+   *     「完整看完」会通过 GD_OPTIONS.onEvent 抛 SDK_REWARDED_WATCH_COMPLETE，
+   *     我们只认这个事件发奖励 —— 中途跳过不算。
+   *
+   *  2) Monetag 风格的 show_<zoneId> 函数
+   *     调用后返回 Promise。它没有"看完"回调，Promise 成功即视作完成。
+   *
+   * 调用约定若与文档不一致，只改这一段即可。
    * ------------------------------------------------------ */
 
+  /* 有没有 GameDistribution SDK */
+  function gd() {
+    const g = window.gdsdk;
+    return (g && typeof g.showAd === 'function') ? g : null;
+  }
+
+  /* Monetag 风格：window.show_<数字> */
   function sdk() {
     try {
       const keys = Object.keys(window);
@@ -51,11 +66,59 @@
   }
 
   function ready() {
-    return !!sdk();
+    return !!(gd() || sdk());
   }
 
-  /* 激励视频：看完 resolve(true)，中途关掉/没填充 resolve(false) */
+  /* GameDistribution 的「看完」回调从这里进来（index.html 里的 GD_OPTIONS.onEvent 转发） */
+  let rewardPending = null;
+  function onAdEvent(e) {
+    const name = e && e.name;
+    if (name === 'SDK_GAME_PAUSE') {
+      const g = window.__DNW__;
+      if (g && g.duckSound) g.duckSound(true);
+    } else if (name === 'SDK_GAME_START') {
+      const g = window.__DNW__;
+      if (g && g.duckSound) g.duckSound(false);
+    } else if (name === 'SDK_REWARDED_WATCH_COMPLETE') {
+      if (rewardPending) { const f = rewardPending; rewardPending = null; f(true); }
+    }
+  }
+
+  /* 激励广告：完整看完 resolve(true)，跳过/没填充/报错 resolve(false) */
   function rewarded() {
+    const g = gd();
+
+    if (g) {
+      return new Promise(function (resolve) {
+        let done = false;
+        function fin(ok) {
+          if (done) return;
+          done = true;
+          if (rewardPending === fin) rewardPending = null;
+          const d = window.__DNW__;
+          if (d && d.duckSound) d.duckSound(false);
+          resolve(ok);
+        }
+        rewardPending = fin;                 // 等 SDK_REWARDED_WATCH_COMPLETE
+        const d = window.__DNW__;
+        if (d && d.duckSound) d.duckSound(true);
+        try {
+          const r = g.showAd('rewarded');
+          if (r && typeof r.then === 'function') {
+            r.then(function () {
+              /* 广告流程结束（可能是看完了，也可能是被跳过）。
+                 给「看完」事件一点时间先到；到不了就是没看完，不给奖励。 */
+              setTimeout(function () { fin(false); }, 400);
+            }, function () { fin(false); });
+          } else {
+            fin(false);
+          }
+        } catch (e) { fin(false); }
+        setTimeout(function () { fin(false); }, REWARD_TIMEOUT);
+      });
+    }
+
+    /* Monetag 风格：没有看完回调，Promise 成功即算完成 */
     const fn = sdk();
     if (!fn) return Promise.resolve(false);
     return new Promise(function (resolve) {
@@ -64,16 +127,16 @@
       try {
         const r = fn({ type: 'reward' });
         if (r && typeof r.then === 'function') r.then(function () { fin(true); }, function () { fin(false); });
-        else fin(true);
-      } catch (e) {
-        fin(false);
-      }
+        else fin(false);
+      } catch (e) { fin(false); }
       setTimeout(function () { fin(false); }, REWARD_TIMEOUT);
     });
   }
 
-  /* 插屏：不关心结果 */
+  /* 插屏/中插：不关心结果 */
   function interstitial() {
+    const g = gd();
+    if (g) { try { g.showAd(); } catch (e) { /* 忽略 */ } return; }
     const fn = sdk();
     if (!fn) return;
     try { fn({ type: 'inApp' }); } catch (e) { /* 忽略 */ }
@@ -98,7 +161,7 @@
   /* 能不能给一次复活机会 */
   function canOffer() {
     if (revivedThisGame >= REVIVE_PER_GAME) return false;
-    if (REQUIRE_AD && !sdk()) return false;
+    if (REQUIRE_AD && !ready()) return false;
     if (!el('revivePrompt') || !el('overPanel')) return false;
     return true;
   }
@@ -151,7 +214,7 @@
     if (btn) btn.disabled = true;
 
     /* 有广告就先播广告；没有广告（且不是严格模式）就直接放行 */
-    const gate = sdk() ? rewarded() : Promise.resolve(!REQUIRE_AD);
+    const gate = ready() ? rewarded() : Promise.resolve(!REQUIRE_AD);
 
     gate.then(function (ok) {
       busy = false;
@@ -227,11 +290,12 @@
     document.addEventListener('visibilitychange', syncReviveBtn);
   }
 
-  /* 给别处留的钩子（game.js 调 offerRevive，控制台也能调试） */
+  /* 给别处留的钩子（game.js 调 offerRevive，GD_OPTIONS.onEvent 调 onAdEvent） */
   window.DNWAd = {
     ready: ready,
     rewarded: rewarded,
     interstitial: interstitial,
+    onAdEvent: onAdEvent,
     offerRevive: offerRevive,
     settle: toSettle,
     newGame: newGame

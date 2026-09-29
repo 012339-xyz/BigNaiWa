@@ -43,8 +43,11 @@ function makeEl(id) {
   return el;
 }
 
-/* 搭一个独立运行环境；withSdk=true 时挂上假的 show_9876543 */
-function setup(withSdk) {
+/* 搭一个独立运行环境
+   mode = false    → 没有任何广告 SDK
+   mode = true     → Monetag 风格 show_<zone>
+   mode = 'gd'     → GameDistribution（有真正的激励视频 + 看完回调） */
+function setup(mode) {
   const els = {};
   ['game', 'stage', 'overlay', 'score', 'best', 'finalScore', 'finalBest', 'next', 'chain',
    'soundBtn', 'resetBtn', 'restartBtn', 'reviveBtn', 'revivePrompt', 'overPanel',
@@ -78,9 +81,17 @@ function setup(withSdk) {
   load('assets/fruits/parts.js');
   load('game.js');
 
-  const state = { gameOverCalls: 0, adCalls: [] };
+  const state = { gameOverCalls: 0, adCalls: [], resolveAd: null };
   sandbox.window.DanaiwaBoard = { onGameOver() { state.gameOverCalls++; return 'orig'; } };
-  if (withSdk) {
+  if (mode === 'gd') {
+    sandbox.window.gdsdk = {
+      showAd(arg) {
+        const t = typeof arg === 'string' ? arg : (arg && arg.type) || '(none)';
+        state.adCalls.push({ type: t });
+        return new Promise(function (r) { state.resolveAd = r; });
+      }
+    };
+  } else if (mode === true) {
     sandbox.window.show_9876543 = function (opts) { state.adCalls.push(opts); return Promise.resolve(); };
   }
   load('ad.js');
@@ -192,6 +203,44 @@ const ball = (y, r) => ({ x: 200, y, r: r || 30, dead: false, landed: true, over
   F.sandbox.window.DanaiwaBoard.onGameOver(3);
   eq(F.state.adCalls.filter((c) => c.type === 'inApp').length, before + 1, '第三局弹一次插屏');
   eq(F.state.gameOverCalls, 3, '原 onGameOver 每局都被正常调用');
+
+  /* ---------- G. GameDistribution：完整看完才给复活 ---------- */
+  console.log('\n[G] GameDistribution：只有完整看完才给复活');
+  const G = setup('gd');
+  await sleep(200);
+  ok(G.AD.ready() === true, '识别到 gdsdk');
+  eq(G.AD.offerRevive(), true, '接管弹窗，先问要不要复活');
+  eq(G.els.reviveBtn.textContent, '📺 看广告复活', '文案是「看广告复活」');
+
+  const ducks = [];
+  G.G.duckSound = function (on) { ducks.push(on); };
+
+  G.G.state.balls = [ball(600), ball(120)];
+  G.G.state.over = true;
+  G.els.reviveBtn.click();
+  await sleep(150);
+  eq(G.state.adCalls.length, 1, '调了 gdsdk.showAd');
+  eq(G.state.adCalls[0].type, 'rewarded', '请求的是 rewarded');
+  ok(ducks.indexOf(true) >= 0, '广告期间把游戏静音了');
+
+  /* 关键：先不发「看完」事件，只让 showAd 的 Promise 结束 → 不能给奖励 */
+  G.state.resolveAd();
+  await sleep(700);
+  eq(G.G.state.balls.length, 2, '广告被跳过 → 一颗都不消除');
+  eq(G.G.state.over, true, '仍然是判负状态');
+
+  /* 再来一次，这次发「看完」事件 */
+  G.G.state.balls = [ball(600), ball(120)];
+  G.G.state.over = true;
+  G.els.reviveBtn.click();
+  await sleep(150);
+  G.AD.onAdEvent({ name: 'SDK_REWARDED_WATCH_COMPLETE' });
+  await sleep(300);
+  eq(G.G.state.balls.length, 1, '完整看完 → 最顶上那颗被消除');
+  eq(G.G.state.over, false, '复活成功');
+  eq(G.els.revivePrompt.hidden, true, '询问屏收起');
+  ok(ducks[ducks.length - 1] === false, '广告结束后取消了静音');
+  eq(G.state.gameOverCalls, 0, '复活成功 → 不交成绩');
 
   console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
   process.exit(fail ? 1 : 0);
