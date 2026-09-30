@@ -90,21 +90,22 @@ npx --yes http-server -p 8080
 
 | 文件 | 说明 |
 | --- | --- |
-| `index.html` | 页面结构：棋盘、结束遮罩、侧边面板、排行榜弹窗 |
-| `style.css` | 全部样式：玻璃拟态面板、响应式布局、结束动画、排行榜 |
-| `game.js` | 游戏壳：Canvas 渲染 + WebAudio 音效 + 粒子 + 输入，模拟部分全部委托给 `sim.js` |
-| `sim.js` | **确定性模拟核心**：物理、合成、计分、判负、投放节奏、随机，以及回放编解码和重放验证 |
-| `leaderboard.js` | 在线排行榜（TinyWebDB 接口 + 弹窗渲染 + 回放验证调度），页面直接引用它 |
+| `index.html` | 页面结构：棋盘、结束遮罩、回放 HUD、侧边面板、排行榜弹窗 |
+| `style.css` | 全部样式：玻璃拟态面板、响应式布局、结束动画、回放 HUD、排行榜 |
+| `game.js` | 游戏壳：Canvas 渲染 + WebAudio 音效 + 粒子 + 输入 + **回放播放模式**，模拟部分全部委托给 `sim.js` |
+| `sim.js` | **确定性模拟核心**：物理、合成、计分、判负、投放节奏、随机，以及回放编解码、重放播放器（`makePlayer`）和重放验证 |
+| `leaderboard.js` | 在线排行榜（TinyWebDB 接口 + 弹窗渲染 + 回放验证调度）+ **本地存档 `danaiwa.saves.v1`**，页面直接引用它 |
 | `leaderboard.worker.js` | 排行榜验证 Worker：在后台把回放重跑一遍，不卡主线程 |
 | `sponsor.js` | 结算页「赞助作者」弹窗（展示微信收款码），纯静态、无网络请求 |
 | `assets/fruits/` | 11 张统一后的水果贴图（512×512 PNG，透明底）+ `parts.js` 碰撞形状 |
 | `tools/normalize_assets.py` | 素材统一脚本：抠底、去噪、统一画布、烤暗边 |
 | `tools/build_parts.py` | 按贴图轮廓生成碰撞形状，产出 `assets/fruits/parts.js` |
 | `tools/board_spoof.js` | 旧版排行榜的攻击演示脚本（Node），用来复现「分数可以随便写」这个问题 |
+| `tools/smoke_replay.js` | 浏览器冒烟（可选，开发机上要先 `npm i puppeteer-core`）：headless chromium 真的点一遍回放 |
 | `src/` | 原始素材（11 张，格式/尺寸/底色都不统一），只作为脚本输入 |
 | `physics.test.js` | 物理手感自检脚本（`node physics.test.js`） |
-| `replay.test.js` | 回放自检：跑完一局 → 重放 → 分数一致；各种伪造全部被拒（`node replay.test.js`） |
-| `leaderboard.test.js` | 榜单规则自检：过滤、去重、排序、验证、沉底（`node leaderboard.test.js`） |
+| `replay.test.js` | 回放自检：跑完一局 → 重放 → 分数一致；各种伪造全部被拒；**播放器与播放外壳**（`node replay.test.js`） |
+| `leaderboard.test.js` | 榜单规则自检：过滤、去重、排序、验证、沉底；**本地存档与两个重放按钮**（`node leaderboard.test.js`） |
 | `preview.png` | 预览图 |
 
 ## 排行榜
@@ -232,12 +233,52 @@ POST user=<你的 user>&secret=<你的 secret>&action=search&no=1&count=100&tag=
 
 换账号：改 `leaderboard.js` 顶部的 `USER` / `SECRET` / `PREFIX` 即可，换 `PREFIX` 相当于另开一个榜。
 
+### 回放查看器（重放按钮）
+
+榜上和本地各留了**两个入口**，干的都是同一件事：把一局回放重新跑一遍放给你看。
+
+- **排行榜弹窗**：每行末尾一颗 ▶。只要一条记录进得了榜，它就一定带着回放，
+  所以**每行都有**；❌ 那行的按钮故意做得更显眼 —— 越可疑，越该让人亲眼看一遍。
+- **结算页（上传页）**：`🎬 重放存档`，播你**刚打完的这一局**（本地存档最新一条），
+  按钮上标着这局的验证结论（✅ / ❌），`title` 是被拒的原因。HUD 里 ◀ 往前翻旧的。
+
+本地存档在 `localStorage` 的 `danaiwa.saves.v1`：`[{t, score, r, fp, status, reason}]`，
+**最多 10 局**，按回放指纹 `fingerprint(r)` 去重（指纹**去掉了分数那一段**，
+所以同一局换个分数再提交也不会多出一条），**提交失败的也照样存**。
+榜上某条记录验证完，结论按 `fp` + 分数写回同一条存档 —— 所以结算页说得出「你这局为什么没过」。
+
+**播放的时候**
+
+- 播放用的是**另一个** `Sim.create()` 实例。你手上那一局（连同粒子、准星、冷却、分数）
+  原封不动地冻在 `sim.state` 里，退出回放切回来接着玩 —— 不需要快照，也不需要恢复；
+- HUD 显示**实际跑出来的分数**和**声称的分数**，外加 tick 进度、状态徽标、被拒原因；
+  1× / 2× / 4× 调速，空格暂停，Esc 退出，播完就停在「回放结束」；
+- 播放期间指针、键盘、`R` 全部让路，`onGameOver()` 被拦掉 ——
+  否则播到判负会把这份回放**再提交一次**；
+- 播放不会写 `danaiwa.best`（看一局录像没道理抬高你的最高分），
+  也不会往 `state.inputs` 里塞东西 —— **同一份存档播多少遍都不会被自己污染**。
+
+> **回放只是看，不改变任何验证结论。**播放器和 `verify()` 建立在同一段推进逻辑上
+> （`Sim.makePlayer`），所以「你看到的」和「判出来的」永远是同一回事 ——
+> 但也仅此而已：**❌ 的记录你放不放它都还是 ❌**，播放器不会替它翻案。
+> 想知道一条记录为什么被拒，看 HUD 底部那行原因
+> （`分数对不上：声称 9389，实际 1389`）。
+
+已知边界：因 `mismatch` / `time` 被丢弃的记录其实也带着回放，但它们进不了榜，
+没有行可挂 ▶，所以看不到（要展示得额外留一份「被拒记录」列表，暂不做）。
+
 ### 回归测试
 
 ```bash
 node physics.test.js      # 手感没变（物理、判负、输入）
-node replay.test.js       # 回放能复现分数；改分数 / 改落点 / 改种子 / 砍掉一半投放 / 老格式全被拒
-node leaderboard.test.js  # 榜单规则：过滤、去重、排序、验证、假成绩沉底
+node replay.test.js       # 回放能复现分数；改分数 / 改落点 / 改种子 / 砍掉一半投放 / 老格式全被拒；
+                          # 播放器逐帧推进、不污染存档；播放外壳进得出、冻得住、不重复提交
+node leaderboard.test.js  # 榜单规则：过滤、去重、排序、验证、假成绩沉底；
+                          # 本地存档封顶 10 局、去重、状态回写；每行的 ▶ 点得动
+
+# 可选：真在浏览器里点一遍（单测看不到的那部分 —— DOM 显示没有、遮罩收没收回、控制台干不干净）
+# 需要开发机上有 chromium 和 puppeteer-core（npm i puppeteer-core），仓库本身仍然零依赖
+node tools/smoke_replay.js
 ```
 
 ## 碰撞形状（不是圆）

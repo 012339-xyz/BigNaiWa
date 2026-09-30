@@ -7,6 +7,10 @@
  *    2. 编解码往返不丢信息
  *    3. 各种伪造手法全部被拒（改分数 / 改落点 / 改种子 / 截断 / 老格式 / 灌未来时间）
  *    4. 同一份回放跑两次结果一样（确定性）
+ *    5. 播放器（存档的「重放」按钮用）：逐帧推进、不污染存档、
+ *       声称分数是假的也照样能播完 —— 没通过校验的存档照样能看
+ *    6. 回放外壳（game.js 的播放模式）：进得去、出得来、
+ *       播放中动不了你手上那一局、播到判负也不会重复触发 onGameOver
  * ============================================================ */
 'use strict';
 const fs = require('fs'), path = require('path'), vm = require('vm');
@@ -225,6 +229,159 @@ console.log('[5] 旧攻击在新规则下');
 check('没有回放就上不了榜', !Sim.verify(JSON.stringify({ n: 'x', s: 1, t: 1 })).ok);
 check('空回放会被拒', !Sim.verify('').ok);
 check('超长回放会被拒（防拖垮验证者）', !Sim.verify('v2;1;' + (Sim.MAX_TICKS + 1).toString(36) + ';1;').ok);
+
+/* ---- 6. 播放器：存档的「重放」按钮就靠它 ---- */
+console.log('[6] 播放器（存档回放）');
+
+/* 6a 逐帧推进：每次 step 正好走 1 tick，播完的分数和 tick 就是回放声称的那个 */
+{
+  const p = Sim.makePlayer(enc);
+  let steps = 0, jump = false, prev = p.tick;
+  while (p.step()) {
+    steps++;
+    if (p.tick !== prev + 1) jump = true;
+    prev = p.tick;
+    if (steps > Sim.MAX_TICKS) break;
+  }
+  check('播放器能逐帧走完整局', p.done && !p.error, p.error || ('播了 ' + steps + ' 帧'));
+  check('每次 step() 正好推进 1 tick', !jump, jump ? '有跳帧' : '共 ' + steps + ' 帧，每帧 +1');
+  check('播完的分数 = 回放声称的分数', p.score === rep.score, p.score + ' vs ' + rep.score);
+  check('播完的 tick = 回放声称的时长', p.tick === rep.end, p.tick + ' vs ' + rep.end);
+}
+
+/* 6b 播放不能污染存档：injectDrop 本来就不写 inputs，这里盯死 */
+{
+  const p = Sim.makePlayer(enc);
+  while (p.step()) { /* 播完 */ }
+  check('播放不写 inputs（存档播几遍都不会被自己改掉）',
+    p.state.inputs.length === 0, 'inputs 长度 = ' + p.state.inputs.length);
+}
+
+/* 6c 也不许改动传进来的回放对象（上传页传进来的可能是同一个对象） */
+{
+  const rep2 = Sim.decode(enc);
+  const snapshot = JSON.stringify(rep2);
+  const p = Sim.makePlayer(rep2);
+  while (p.step()) { /* 播完 */ }
+  check('播放不改动传进来的回放对象',
+    JSON.stringify(rep2) === snapshot, '前 ' + JSON.stringify(rep2).length + ' 字符未变');
+}
+
+/* 6d 没通过校验的照样能播 —— 这正是「没过校验也能看」要的性质。
+   （「verify 判它不过」上面 4b 已经验过，这里只管播放器。） */
+{
+  const lied = { v: 2, seed: rep.seed, end: rep.end, score: 99999999, inputs: rep.inputs };
+  const p = Sim.makePlayer(lied);
+  while (p.step()) { /* 播完 */ }
+  check('声称分数是假的也照样能播完，给出真实分数',
+    p.done && !p.error && p.score === rep.score,
+    '跑出 ' + p.score + ' 分，声称 ' + p.claimed + ' 分');
+}
+
+/* 6e 播两遍结果一致 */
+{
+  const a = Sim.makePlayer(enc), b = Sim.makePlayer(enc);
+  while (a.step()) { /* 播完 */ }
+  while (b.step()) { /* 播完 */ }
+  check('同一份回放播两遍结果一致',
+    a.score === b.score && a.tick === b.tick && a.consumed === b.consumed,
+    a.score + '/' + a.tick + ' vs ' + b.score + '/' + b.tick);
+}
+
+/* 6f 坏回放：直接报错、done、step 返回 false（不会卡在那儿空转） */
+{
+  const bad = Sim.makePlayer('');
+  check('空回放直接报错并且不动', bad.error === '回放格式不对' && bad.done && bad.step() === false,
+    'error=' + bad.error);
+  const bad2 = Sim.makePlayer(JSON.stringify({ n: 'x', s: 1, t: 1 }));
+  check('老格式记录不能播', !!bad2.error && bad2.done, 'error=' + bad2.error);
+}
+
+/* ---- 7. 回放外壳：game.js 里的「播放模式」 ---- */
+console.log('[7] 回放外壳（播放模式）');
+{
+  /* 先开一局新的，模拟「打到一半想去看别人的回放」 */
+  U.reset();
+  pump(5);
+  const live = U.sim.state;
+  const snap = {
+    tick: live.tick, score: live.score, balls: live.balls.length,
+    inputs: live.inputs.length, aimX: live.aimX
+  };
+  const sub0 = { score: submitted.score, replay: submitted.replay };
+
+  check('外壳入口都在',
+    typeof U.playReplay === 'function' && typeof U.stopReplay === 'function');
+
+  const ok = U.playReplay(enc, {
+    source: 'save', index: 0, title: '本地存档',
+    claimed: rep.score, status: 'bad', reason: '分数对不上'
+  });
+  check('能开播', ok === true && U.mode === 'play', 'mode=' + U.mode);
+  check('开播后 state 指向回放那一份模拟', U.state !== live);
+  check('开播时把结算框收起来', !els.overlay.classList.contains('show'));
+
+  /* 播放中乱按乱点，都必须打不到你手上这一局 ——
+     tryDrop/moveAim 走的是 sim（live 那一份），护栏少一道就会污染存档前的那一局 */
+  down({ clientX: 200, clientY: 80, pointerType: 'mouse' });
+  listeners.get(els.stage).pointermove({ clientX: 350, clientY: 80, pointerType: 'mouse' });
+  check('播放中按鼠标不会投进你那局', live.inputs.length === snap.inputs,
+    'inputs ' + snap.inputs + ' → ' + live.inputs.length);
+  check('播放中拖动不会动你那局的准星', live.aimX === snap.aimX,
+    'aimX ' + snap.aimX + ' → ' + live.aimX);
+
+  /* 4 倍速把整局看完（真事件自带 preventDefault，桩件里补一个） */
+  const kd = winListeners.keydown;
+  const key = (code) => ({ code, preventDefault() { } });
+  kd(key('ArrowRight'));
+  kd(key('ArrowRight'));
+  check('→ 能调倍速', U.playSpeed === 4, 'playSpeed=' + U.playSpeed);
+
+  kd(key('Space'));
+  const pausedAt = U.player.tick;
+  pump(12);
+  check('空格能暂停', U.player.tick === pausedAt, 'tick=' + U.player.tick);
+  kd(key('Space'));
+  pump(40);
+  check('再按一下继续走', U.player.tick > pausedAt, pausedAt + ' → ' + U.player.tick);
+
+  /* 播到这局判负为止 —— 那一刻要是没拦住，就会再走一遍 onGameOver：
+     弹结算框 + 把这局回放再提交一次 */
+  pump(Math.ceil(rep.end / 4) + 240);
+  check('整局能播完', !!(U.player && U.player.done),
+    U.player ? (U.player.error || ('tick=' + U.player.tick + '/' + U.player.end)) : '播放器没了');
+  check('播到判负不会自己弹结算框', !els.overlay.classList.contains('show'));
+  check('更不会把这局回放再提交一次',
+    submitted.replay === sub0.replay && submitted.score === sub0.score,
+    'submitted 还是原来那条');
+
+  check('播放全程你手上那一局一帧都没动',
+    live.tick === snap.tick && live.score === snap.score &&
+    live.balls.length === snap.balls && live.inputs.length === snap.inputs,
+    'tick ' + snap.tick + '→' + live.tick +
+    '，balls ' + snap.balls + '→' + live.balls.length +
+    '，inputs ' + snap.inputs + '→' + live.inputs.length);
+
+  kd(key('Escape'));
+  check('Esc 能退出回放', U.mode === 'game' && U.state === live, 'mode=' + U.mode);
+
+  /* 退出来游戏是活的：这一下得真投出去 */
+  const before2 = live.inputs.length;
+  down({ clientX: 210, clientY: 80, pointerType: 'mouse' });
+  check('退出回放后又能正常投放', live.inputs.length === before2 + 1,
+    'inputs ' + before2 + ' → ' + live.inputs.length);
+
+  /* 结算页上点▶：遮罩要记得收起、退出来要记得还回去 */
+  els.overlay.classList.add('show');
+  const ok2 = U.playReplay(enc, { source: 'save', index: 0, title: '结算页' });
+  check('结算页上也能开播（遮罩顺手收起来）',
+    ok2 === true && !els.overlay.classList.contains('show'));
+  U.stopReplay();
+  check('退出回放把结算框还回来', els.overlay.classList.contains('show'));
+
+  check('坏回放开不了播',
+    U.playReplay('', {}) === false && U.mode === 'game', 'mode=' + U.mode);
+}
 
 console.log(pass ? '\n回放验证自检通过' : '\n回放验证自检未通过');
 process.exit(pass ? 0 : 1);

@@ -38,12 +38,32 @@
         </div>
 
         <div class="dialog-actions">
+          <button class="btn" id="replayBtn" type="button">🎬 重放存档</button>
           <button class="btn" id="boardBtn2" type="button">🏆 排行榜</button>
           <button class="btn btn-primary" id="restartBtn" type="button">再来一局</button>
           <button class="btn btn-sponsor btn-wide" id="sponsorBtn" type="button">🌶️ 可以赏作者一包辣条嘛</button>
         </div>
         <p class="dialog-hint">按 R 键也可重新开始</p>
       </div>
+    </div>
+
+    <!-- ===== 回放 HUD：看本地存档 / 看榜上某一局时才出现 ===== -->
+    <div class="replay-hud" id="replayHud" hidden>
+      <div class="replay-head">
+        <span class="replay-badge is-none" id="replayBadge">🎬 回放</span>
+        <span class="replay-title" id="replayTitle">存档回放</span>
+        <button class="icon-btn" id="replayClose" type="button" aria-label="退出回放">✕</button>
+      </div>
+      <p class="replay-score"><strong id="replayScore">0</strong><span id="replayClaimed"></span></p>
+      <div class="replay-bar"><i id="replayBar"></i></div>
+      <div class="replay-actions">
+        <button class="btn btn-sm" id="replayPause" type="button">⏸ 暂停</button>
+        <button class="btn btn-sm" id="replaySpeed" type="button">1×</button>
+        <button class="btn btn-sm" id="replayPrev" type="button" hidden>◀ 上一局</button>
+        <button class="btn btn-sm" id="replayNext" type="button" hidden>下一局 ▶</button>
+        <button class="btn btn-sm btn-primary" id="replayStop" type="button">退出回放</button>
+      </div>
+      <p class="replay-note" id="replayNote"></p>
     </div>
   </section>
 

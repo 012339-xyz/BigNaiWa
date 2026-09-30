@@ -23,7 +23,10 @@
  *
  *  对外接口和老版本完全一致，game.js 不用改：
  *    window.DanaiwaBoard = { open, close, refresh, onGameOver,
- *                            fetchTop, submitScore, myName, setName, hasName }
+ *                            fetchTop, submitScore, myName, setName, hasName,
+ *                            saves, saveAt, saveCount, replaySave, replayRow }
+ *  最后一组是「本地存档 / 重放」用的：一局打完就存进 danaiwa.saves.v1（最多 10 局），
+ *  上传失败、验证不通过的照样留着 —— 看回放不需要它通过校验。
  * ============================================================ */
 (function () {
   'use strict';
@@ -55,6 +58,11 @@
   var CACHE_PREFIX = 'danaiwa.vf.';
   var SELF_KEY = 'danaiwa.self';    // 自己那条记录，被人删了/改了会自己补回去
   var HEAL_GAP = 60000;             // 补档最多一分钟一次
+
+  /* 本地存档：最近 10 局，重放按钮的数据源。
+     上传失败的、验证不通过的，这里照样留着 —— 看回放本来就不需要它通过。 */
+  var SAVES_KEY = 'danaiwa.saves.v1';
+  var SAVES_MAX = 10;
 
   var Sim = window.SUIKA_SIM;
   var $ = function (id) { return document.getElementById(id); };
@@ -240,6 +248,8 @@
       item.ms = res.ms || 0;
       if (res.ok) cachePut(item.fp, item.score, 'ok');
       else if (res.reason && res.reason.indexOf('太慢') < 0) cachePut(item.fp, item.score, 'bad');
+      /* 结论同步写回本地存档，上传页那边才说得出「你这局为什么没过」 */
+      saveSetStatus(item.fp, item.score, item.status, item.reason);
       paintRows();
     }
     inflight = null;
@@ -295,8 +305,13 @@
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
       var cached = cacheGet(row.fp, row.score);
-      if (cached === 'ok') { row.status = 'ok'; continue; }
-      if (cached === 'bad') { row.status = 'bad'; row.reason = '（本地已判定不通过）'; continue; }
+      if (cached === 'ok') { row.status = 'ok'; saveSetStatus(row.fp, row.score, 'ok', ''); continue; }
+      if (cached === 'bad') {
+        row.status = 'bad';
+        row.reason = '（本地已判定不通过）';
+        saveSetStatus(row.fp, row.score, 'bad', row.reason);
+        continue;
+      }
       row.status = 'pending';
       queue.push(row);
     }
@@ -315,6 +330,7 @@
   var nickInput = $('nickInput');
   var nameLabel = $('myNameLabel');
   var submitBtn = $('submitBtn');
+  var replayBtn = $('replayBtn');
   var submitBox = $('submitBox');
   var lastSubmitAt = 0;
   var submitting = false;
@@ -415,10 +431,26 @@
       badge.className = 'board-verify is-' + row.status;
       badge.textContent = BADGE[row.status];
 
+      /* 每行一个 ▶：榜上只要进了榜就一定带回放，点它就能整局重放。
+         ❌ 那行的按钮在样式里做得更显眼 —— 越可疑，越该让人亲眼看一遍。 */
+      var play = document.createElement('button');
+      play.className = 'board-play';
+      play.type = 'button';
+      play.textContent = '▶';
+      play.title = row.status === 'bad'
+        ? '重放这一局（' + (row.reason || '没通过校验') + '）'
+        : '重放这一局';
+      play.setAttribute('aria-label', '重放 ' + row.name + ' 的这一局');
+      play.addEventListener('click', function (ev) {
+        if (ev.stopPropagation) ev.stopPropagation();
+        playRow(row);
+      });
+
       line.appendChild(rank);
       line.appendChild(name);
       line.appendChild(score);
       line.appendChild(badge);
+      line.appendChild(play);
 
       if (!marked && currentMine != null && row.score === currentMine && row.status === 'ok') {
         line.classList.add('is-mine');
@@ -465,7 +497,111 @@
   }
 
   /* =========================================================
-   *  5. 提交
+   *  5. 本地存档（重放按钮的数据源）
+   *
+   *  一局打完就存一条，**不管提交成功没有、验证通过没有** ——
+   *  「没通过回放校验也能看」正是这个功能存在的理由。
+   *  按回放指纹去重（同一局换个分数再提交不会多出一条），
+   *  最多留 10 局，超出的挤掉最旧的。
+   * ======================================================= */
+  function loadSaves() {
+    try {
+      var a = JSON.parse(localStorage.getItem(SAVES_KEY) || '[]');
+      return Object.prototype.toString.call(a) === '[object Array]' ? a : [];
+    } catch (e) { return []; }
+  }
+
+  function storeSaves(list) {
+    try { localStorage.setItem(SAVES_KEY, JSON.stringify(list)); }
+    catch (e) { /* 配额爆了就算了，存档本来就是锦上添花 */ }
+  }
+
+  function pushSave(score, replayStr) {
+    if (!replayStr) return null;
+    var fp;
+    try { fp = fingerprint(replayStr); } catch (e) { return null; }
+    var list = loadSaves();
+    for (var i = list.length - 1; i >= 0; i--) {
+      if (list[i] && list[i].fp === fp) list.splice(i, 1);
+    }
+    list.unshift({
+      t: Date.now(),
+      score: Number(score) || 0,
+      r: replayStr,
+      fp: fp,
+      status: 'pending',
+      reason: ''
+    });
+    if (list.length > SAVES_MAX) list.length = SAVES_MAX;
+    storeSaves(list);
+    return list[0];
+  }
+
+  /* 某条榜记录验完，把结论写回**同一份**回放的本地存档 ——
+     fp 去掉了分数那一段，所以还要比对分数，
+     免得别人拿同一份回放改个分数来污染你本地的状态。 */
+  function saveSetStatus(fp, score, status, reason) {
+    if (!fp) return;
+    var list = loadSaves(), changed = false;
+    for (var i = 0; i < list.length; i++) {
+      var s = list[i];
+      if (!s || s.fp !== fp || Number(s.score) !== Number(score)) continue;
+      if (s.status !== status || s.reason !== (reason || '')) {
+        s.status = status;
+        s.reason = reason || '';
+        changed = true;
+      }
+    }
+    if (changed) storeSaves(list);
+  }
+
+  function saveAt(i) {
+    var list = loadSaves();
+    return list[i] || null;
+  }
+
+  /* 播放一局存档（或榜上的一条记录）。外壳在 game.js，数据在这里。 */
+  function play(record, meta) {
+    var shell = window.__DNW__ && window.__DNW__.playReplay;
+    if (!shell || !record) return false;
+    try { return shell(record, meta || {}); }
+    catch (e) { return false; }
+  }
+
+  function playSave(i) {
+    var s = saveAt(i);
+    if (!s || !s.r) return false;
+    return play(s.r, {
+      source: 'save', index: i,
+      title: '本地存档 · ' + s.score + ' 分',
+      claimed: s.score, status: s.status, reason: s.reason,
+      t: s.t
+    });
+  }
+
+  function playRow(row) {
+    if (!row || !row.r) return false;
+    return play(row.r, {
+      source: 'row', fp: row.fp,
+      title: row.name + ' · ' + row.score + ' 分',
+      claimed: row.score, status: row.status, reason: row.reason,
+      t: row.t
+    });
+  }
+
+  /* 结算页上那颗「🎬 重放存档」：没存档就整颗藏起来，
+     有的话顺手把这局的验证结论写在按钮上（❌ 要一眼看见）。 */
+  function paintReplayBtn() {
+    if (!replayBtn) return;
+    var latest = saveAt(0);
+    replayBtn.hidden = !latest;
+    replayBtn.textContent = '🎬 重放存档' +
+      (latest && latest.status === 'ok' ? ' ✅' : latest && latest.status === 'bad' ? ' ❌' : '');
+    replayBtn.title = (latest && latest.reason) ? latest.reason : '看这一局到底怎么打的';
+  }
+
+  /* =========================================================
+   *  6. 提交
    * ======================================================= */
   var lastHealAt = 0;
 
@@ -546,10 +682,24 @@
     pushScore(myName(), pendingReplay, true);
   }
 
+  function encodeReplay(rep) {
+    if (!rep) return '';
+    if (typeof rep === 'string') return rep;
+    try { return Sim.encode(rep) || ''; } catch (e) { return ''; }
+  }
+
   function onGameOver(score, replay) {
-    if (!submitBox) return;
     pendingReplay = replay || '';
     pendingScore = Number(score) || 0;
+    /* 先落一份本地存档，再谈提交：提交失败、验证不通过、
+       甚至页面上根本没有提交框，这一局都还能拿回来看。 */
+    if (pendingScore > 0 && pendingReplay) {
+      pushSave(pendingScore, encodeReplay(pendingReplay));
+    }
+    /* 有没有存档决定「重放存档」按钮出不出现 —— 没有可看的就别占地方。
+       按钮上顺便标一下这局的验证状态：❌ 的要让人一眼看见。 */
+    paintReplayBtn();
+    if (!submitBox) return;
     paintName();
     showRetry(false);
     if (!(pendingScore > 0) || !pendingReplay) {
@@ -562,7 +712,7 @@
   }
 
   /* =========================================================
-   *  6. 绑定
+   *  7. 绑定
    * ======================================================= */
   function bind() {
     var boardBtn = $('boardBtn');
@@ -581,6 +731,14 @@
       });
     }
     if (submitBtn) submitBtn.addEventListener('click', retry);
+    /* 结算页那个「🎬 重放存档」：播的是**刚打完的这一局**（存档里第 0 条）。
+       刚才如果没存上（比如这局没打出回放），按钮本来就不该出现。 */
+    if (replayBtn) {
+      replayBtn.addEventListener('click', function () {
+        if (!playSave(0)) setMsg('这局没有可重放的存档', 'bad');
+      });
+      paintReplayBtn();
+    }
     if (nickInput) {
       nickInput.value = loadName();
       var commit = function () {
@@ -622,6 +780,12 @@
     submitScore: function (name, replay) { return addScore(name, replay); },
     myName: myName,
     setName: function (n) { saveName(cleanName(n)); paintName(); },
-    hasName: function () { return !!loadName(); }
+    hasName: function () { return !!loadName(); },
+    /* 本地存档与重放 */
+    saves: loadSaves,
+    saveAt: saveAt,
+    saveCount: function () { return loadSaves().length; },
+    replaySave: playSave,
+    replayRow: playRow
   };
 })();

@@ -145,12 +145,26 @@
 
   /* 模拟状态是 sim 的（balls/score/tick/inputs/...），
      下面这几个只跟画面有关的字段挂在同一个对象上方便绘制 ——
-     它们不进回放，replay() 只取 seed / end / score / inputs。 */
-  const state = sim.state;
+     它们不进回放，replay() 只取 seed / end / score / inputs。
+
+     `state` 是 let 而不是 const：看回放的时候它会指向**另一个**模拟实例，
+     你手上这一局原样冻在 sim.state 里，退出回放再切回来。
+     平时它恒等于 sim.state（同一个对象），所以老测试拿 __DNW__.state 不受影响。 */
+  let state = sim.state;
   state.best = Number(localStorage.getItem(BEST_KEY) || 0);
   state.particles = [];
   state.floats = [];
   state.flash = 0;
+
+  /* 'game' 正常玩；'play' 正在看回放 —— 输入全部让路，
+     update() 只推进回放那一份模拟，你这一局一帧都不动。 */
+  let mode = 'game';
+  let player = null;          // Sim.makePlayer(...) 的句柄
+  let playMeta = null;        // { source, index, title, claimed, status, reason }
+  let playAcc = 0;            // 播放用的时间累加器
+  let playSpeed = 1;          // 1 / 2 / 4
+  let wasOverlay = false;     // 进回放前结束遮罩是不是开着
+  let wasModal = false;       // 进回放前排行榜弹窗是不是开着
 
   /* 碰撞形状、刚体构造也都在 sim.js（贴图轮廓数据照旧来自 parts.js） */
   const shapeOf = sim.shapeOf;
@@ -191,6 +205,12 @@
      这边只负责把结果同步到界面上 —— 再加一次就会翻倍，
      而且那样 game.js 也就成了「改分数的地方」，回放就复现不了了。 */
   function addScore(n, x, y, text) {
+    /* 看回放时只飘字：不碰最高分、不改面板数字 ——
+       看一局录像没道理把你自己的最高分抬上去，退出来还得改回去。 */
+    if (mode === 'play') {
+      if (x !== undefined) state.floats.push({ x, y, text: text || ('+' + n), life: 1 });
+      return;
+    }
     if (state.score > state.best) {
       state.best = state.score;
       localStorage.setItem(BEST_KEY, String(state.best));
@@ -259,12 +279,15 @@
         haptic(40);
         state.flash = 1;
       } else if (ev.type === 'over') {
-        onGameOver();
+        /* 回放里判负只意味着「播完了」：绝不能弹结算框，
+           更不能走 DanaiwaBoard.onGameOver —— 那会把这份回放再提交一次。 */
+        if (mode === 'game') onGameOver();
       }
     }
   }
 
   function reset() {
+    if (mode === 'play') return;          // 正在看回放，不许动你手上那局
     state.particles.length = 0;
     state.floats.length = 0;
     state.flash = 0;
@@ -459,7 +482,7 @@
   }
 
   function drawAim() {
-    if (state.over) return;
+    if (mode !== 'game' || state.over) return;
     const tier = state.pending;
     const r = FRUITS[tier].r;
     const [lo, hi] = aimLimit(tier);
@@ -620,6 +643,9 @@
   }
 
   function update(dt) {
+    /* 看回放时这里只推进回放那一份模拟 —— 你手上这一局一帧都不动，
+       退出回放接着玩就行，不用快照也不用恢复。 */
+    if (mode === 'play') { updatePlayback(dt); return; }
     if (state.over) return;          // 结束后冻结棋盘（粒子特效仍在 render 里继续）
 
     sim.update(dt);
@@ -643,6 +669,184 @@
       ctx.fillRect(0, 0, W, H);
       ctx.restore();
     }
+
+    if (mode === 'play') paintHud();
+  }
+
+  /* ---------------------------------------------------------
+   *  回放：把一局存档一帧一帧地播出来
+   *
+   *  数据来自 leaderboard.js 的本地存档 / 榜上记录；
+   *  推进逻辑在 sim.js 的 makePlayer 里 —— 和判分用的是同一段代码，
+   *  所以「你看到的」和「验出来的」永远是同一回事。
+   *
+   *  关键点：播放用的是**另一个**模拟实例。`state` 只是个指针，
+   *  从它指向播放实例的那一刻起，你手上那一局（连同它的粒子、准星、
+   *  冷却、分数）原封不动地留在 sim.state 里，一帧都没推进 ——
+   *  退出回放切回来接着玩就行，不需要快照，也不需要恢复。
+   * ------------------------------------------------------- */
+  const hud = document.getElementById('replayHud');
+  const hudBadge = document.getElementById('replayBadge');
+  const hudTitle = document.getElementById('replayTitle');
+  const hudScore = document.getElementById('replayScore');
+  const hudClaimed = document.getElementById('replayClaimed');
+  const hudBar = document.getElementById('replayBar');
+  const hudNote = document.getElementById('replayNote');
+  const btnPause = document.getElementById('replayPause');
+  const btnSpeed = document.getElementById('replaySpeed');
+  const btnPrev = document.getElementById('replayPrev');
+  const btnNext = document.getElementById('replayNext');
+  const btnStop = document.getElementById('replayStop');
+  const btnClose = document.getElementById('replayClose');
+  const boardModalEl = document.getElementById('boardModal');
+
+  let playPaused = false;
+
+  /* 渲染层那几个字段挂到播放实例上，和正式那一局互不相干 */
+  function attachPlayFields(s) {
+    s.particles = [];
+    s.floats = [];
+    s.flash = 0;
+    s.best = state.best;
+    s.aimX = W / 2;
+    return s;
+  }
+
+  function showHud(on) { if (hud) hud.hidden = !on; }
+
+  function bindHud() {
+    if (!hud) return;
+    if (btnStop) btnStop.addEventListener('click', stopReplay);
+    if (btnClose) btnClose.addEventListener('click', stopReplay);
+    if (btnPause) btnPause.addEventListener('click', togglePause);
+    if (btnSpeed) btnSpeed.addEventListener('click', function () {
+      setPlaySpeed(playSpeed === 1 ? 2 : playSpeed === 2 ? 4 : 1);
+    });
+    if (btnPrev) btnPrev.addEventListener('click', function () { stepSave(-1); });
+    if (btnNext) btnNext.addEventListener('click', function () { stepSave(1); });
+  }
+
+  /* 开播。已经在播就直接换一局，不留黑帧。 */
+  function playReplay(record, meta) {
+    if (!record) return false;
+    let p;
+    try { p = S.makePlayer(record); } catch (e) { return false; }
+    if (!p || p.error || !p.state) return false;
+
+    if (mode !== 'play') {
+      wasOverlay = overlay.classList.contains('show');
+      wasModal = !!(boardModalEl && boardModalEl.classList.contains('show'));
+      overlay.classList.remove('show');
+      if (wasModal && window.DanaiwaBoard && window.DanaiwaBoard.close) window.DanaiwaBoard.close();
+      mode = 'play';
+      showHud(true);
+    }
+
+    attachPlayFields(p.state);
+    player = p;
+    playMeta = meta || {};
+    playAcc = 0;
+    playPaused = false;
+    state = p.state;
+    drawNext();
+    paintHud();
+    return true;
+  }
+
+  function stopReplay() {
+    if (mode !== 'play') return false;
+    mode = 'game';
+    player = null;
+    playMeta = null;
+    playPaused = false;
+    playAcc = 0;
+    state = sim.state;                 // 切回你手上这一局（一帧都没动过）
+    showHud(false);
+    scoreEl.textContent = state.score;
+    bestEl.textContent = state.best;
+    drawNext();
+    if (wasOverlay) overlay.classList.add('show');
+    if (wasModal && window.DanaiwaBoard && window.DanaiwaBoard.open) window.DanaiwaBoard.open();
+    wasOverlay = false;
+    wasModal = false;
+    return true;
+  }
+
+  function togglePause() {
+    if (mode !== 'play') return;
+    playPaused = !playPaused;
+    paintHud();
+  }
+
+  function setPlaySpeed(v) {
+    playSpeed = (v === 2 || v === 4) ? v : 1;
+    paintHud();
+  }
+
+  /* 存档列表里前后翻：上传页那个「◀ 上一局 / 下一局 ▶」就是它 */
+  function stepSave(d) {
+    const B = window.DanaiwaBoard;
+    if (!B || !B.saves || !B.replaySave) return;
+    const list = B.saves();
+    if (!list || !list.length) return;
+    let i = (playMeta && typeof playMeta.index === 'number') ? playMeta.index : 0;
+    i = (i + d + list.length) % list.length;
+    B.replaySave(i);
+  }
+
+  function updatePlayback(dt) {
+    if (!player) { stopReplay(); return; }
+    if (playPaused) return;
+
+    playAcc += dt * playSpeed;
+    let guard = 0;
+    while (playAcc >= FIXED && guard < 8) {
+      playAcc -= FIXED;
+      guard++;
+      if (!player.step()) { playAcc = 0; break; }   // 播完了（或这份回放本身有毛病）
+      pumpEvents();                                  // 合成音效 / 粒子 / 飘分
+    }
+    if (guard >= 8) playAcc = 0;                     // 卡了就跳过一点，别越拖越远
+    if (state.flash > 0) state.flash = Math.max(0, state.flash - dt * 2.2 * playSpeed);
+  }
+
+  function paintHud() {
+    if (!hud || mode !== 'play' || !player) return;
+    const m = playMeta || {};
+    const p = player;
+
+    if (hudBadge) {
+      hudBadge.textContent = m.status === 'ok' ? '✅ 已验证'
+        : m.status === 'bad' ? '❌ 没通过'
+          : m.status === 'pending' ? '⏳ 待验证' : '🎬 回放';
+      hudBadge.className = 'replay-badge is-' + (m.status || 'none');
+    }
+    if (hudTitle) hudTitle.textContent = m.title || '存档回放';
+    if (hudScore && hudScore.textContent !== String(p.score)) hudScore.textContent = p.score;
+    if (hudClaimed) {
+      const c = (m.claimed === undefined || m.claimed === null) ? null : Number(m.claimed);
+      hudClaimed.textContent = (c !== null && isFinite(c) && c !== p.score)
+        ? '（声称 ' + c + '）' : '';
+    }
+    if (hudBar) {
+      const pct = p.end > 0 ? Math.min(100, (p.tick / p.end) * 100) : 0;
+      hudBar.style.width = pct.toFixed(1) + '%';
+    }
+    if (btnSpeed) btnSpeed.textContent = playSpeed + '×';
+    if (btnPause) btnPause.textContent = playPaused ? '▶ 继续' : '⏸ 暂停';
+    const isSave = m.source === 'save';
+    if (btnPrev) btnPrev.hidden = !isSave;
+    if (btnNext) btnNext.hidden = !isSave;
+
+    if (hudNote) {
+      let note = p.done
+        ? (p.error ? '这份回放播不下去：' + p.error
+          : '回放结束 · ' + p.score + ' 分 · ' + p.tick + ' tick')
+        : (playPaused ? '已暂停'
+          : '播到 ' + p.tick + ' / ' + p.end + ' tick' + (playSpeed !== 1 ? '　·　' + playSpeed + '×' : ''));
+      if (m.reason) note += '　·　' + m.reason;
+      if (hudNote.textContent !== note) hudNote.textContent = note;
+    }
   }
 
   /* ---------------------------------------------------------
@@ -659,13 +863,13 @@
   let touchAiming = false;
 
   stage.addEventListener('pointermove', (e) => {
-    if (state.over) return;
+    if (mode !== 'game' || state.over) return;
     if (e.pointerType === 'touch' && !touchAiming) return;
     moveAim(pointerToX(e.clientX));
   });
 
   stage.addEventListener('pointerdown', (e) => {
-    if (state.over) return;
+    if (mode !== 'game' || state.over) return;
     Sound.ensure();
     moveAim(pointerToX(e.clientX));
     if (e.pointerType === 'touch') {
@@ -683,7 +887,7 @@
     if (e.pointerType !== 'touch') return;
     if (!touchAiming) return;
     touchAiming = false;
-    if (state.over) return;
+    if (mode !== 'game' || state.over) return;
     moveAim(pointerToX(e.clientX));
     tryDrop();
   });
@@ -702,6 +906,16 @@
 
   window.addEventListener('keydown', (e) => {
     if (isTyping(e)) return;
+
+    /* —— 看回放的时候：Esc 退出，← → 调倍速，空格暂停，其余全让路 —— */
+    if (mode === 'play') {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;    // 浏览器快捷键别拦（刷新、F12…）
+      if (e.code === 'Escape') { stopReplay(); e.preventDefault(); }
+      else if (e.code === 'ArrowLeft') { setPlaySpeed(playSpeed === 4 ? 2 : 1); e.preventDefault(); }
+      else if (e.code === 'ArrowRight') { setPlaySpeed(playSpeed === 1 ? 2 : 4); e.preventDefault(); }
+      else if (e.code === 'Space' || e.code === 'Enter') { togglePause(); e.preventDefault(); }
+      return;
+    }
 
     if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
       state.aimX = clamp(state.aimX - 14, WALL, W);
@@ -786,6 +1000,7 @@
     window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 120));
 
     paintSoundBtn();
+    bindHud();
 
     drawChain();
     reset();
@@ -799,6 +1014,16 @@
     boot();
   }
 
-  /* 调试句柄（控制台可用）：__DNW__.state / .reset() / .drop() / .FRUITS / .render() */
-  window.__DNW__ = { state, reset, tryDrop, stepPhysics, FRUITS, render, resizeCanvas, shapeOf, makeBall, sim };
+  /* 调试句柄（控制台可用）：__DNW__.state / .reset() / .drop() / .FRUITS / .render() /
+     __DNW__.playReplay(record, meta) / .stopReplay() —— 后两个是「重放」按钮的入口。
+     state 是 getter：看回放时它指向播放实例，退出来又指回你这一局，
+     而 `sim.state`（你那一局）从头到尾是同一个对象，测试可以直接拿。 */
+  window.__DNW__ = {
+    get state() { return state; },
+    reset, tryDrop, stepPhysics, FRUITS, render, resizeCanvas, shapeOf, makeBall, sim,
+    playReplay, stopReplay,
+    get mode() { return mode; },
+    get player() { return player; },
+    get playSpeed() { return playSpeed; }
+  };
 })();

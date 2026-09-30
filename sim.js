@@ -653,6 +653,92 @@
   }
 
   /* ---------------------------------------------------------
+   *  播放器：把一局回放一帧一帧地推进，给「观看」用。
+   *
+   *  verify() 就是建立在同一段推进逻辑上 —— 看到的和判分的用同一份代码，
+   *  不会出现「播出来是这样、验出来是那样」的走偏。
+   *
+   *  makePlayer(replay) → {
+   *    state, tick, score,   // 当前模拟状态（可以拿去渲染）
+   *    end, claimed, total,  // 回放声称的时长 / 分数 / 投放次数
+   *    consumed,             // 已经喂进去的投放次数
+   *    done, error,          // 播完了吗 / 出了什么错
+   *    step()                // 推进 1 tick；返回 false = 播完或出错
+   *  }
+   *
+   *  播放不会写 inputs（injectDrop 本来就不写），所以同一份存档
+   *  播多少遍都不会被污染 —— 这一点由 replay.test 断言。
+   * ------------------------------------------------------- */
+  function normalizeReplay(record) {
+    let rep = record;
+    if (typeof record === 'string') {
+      rep = decode(record);
+      if (!rep) return { error: '回放格式不对' };
+    }
+    if (!rep || typeof rep !== 'object') return { error: '回放为空' };
+    if (!isFinite(rep.end) || rep.end <= 0 || rep.end > MAX_TICKS)
+      return { error: '时长不合法' };
+    if (!rep.inputs || rep.inputs.length > MAX_DROPS)
+      return { error: '投放次数不合法' };
+    return { rep: rep };
+  }
+
+  function makePlayer(record, parts) {
+    const norm = normalizeReplay(record);
+    const rep = norm.rep;
+    const sim = rep ? create(rep.seed, parts) : null;
+    const inputs = rep ? rep.inputs : [];
+    const n = inputs.length;
+    let i = 0;
+    let err = norm.error || '';
+
+    function finished() {
+      if (err || !sim) return true;
+      /* 已经判负就停（剩下的投放本就不该存在，verify 会用 consumed 拦下） */
+      if (sim.state.over) return true;
+      return sim.state.tick >= rep.end;
+    }
+
+    function step() {
+      if (finished()) return false;
+      const t = sim.state.tick;
+
+      /* 1) 这个 tick 到期的投放 */
+      while (i < n && inputs[i].t === t) {
+        if (!sim.injectDrop(inputs[i].x, t)) {
+          err = '投放时机不合法（冷却中或已结束）';
+          return false;
+        }
+        i++;
+      }
+      if (i < n && inputs[i].t < t) {
+        err = 'tick 顺序不对';
+        return false;
+      }
+
+      /* 2) 判负之后就不再推进了 */
+      if (sim.state.over) return false;
+
+      sim.update();
+      return true;
+    }
+
+    return {
+      get sim() { return sim; },
+      get state() { return sim ? sim.state : null; },
+      get tick() { return sim ? sim.state.tick : 0; },
+      get score() { return sim ? sim.state.score : 0; },
+      get done() { return finished(); },
+      get error() { return err; },
+      get consumed() { return i; },
+      end: rep ? rep.end : 0,
+      claimed: rep ? rep.score : 0,
+      total: n,
+      step: step
+    };
+  }
+
+  /* ---------------------------------------------------------
    *  验证：把回放重新模拟一遍，分数对得上才算真。
    *
    *  返回 { ok, score, reason }
@@ -663,46 +749,23 @@
    *  用脚本跑出来的合法回放照样过。这是纯静态方案的边界，见 README。
    * ------------------------------------------------------- */
   function verify(record, parts) {
-    let rep = record;
-    if (typeof record === 'string') {
-      rep = decode(record);
-      if (!rep) return { ok: false, score: 0, reason: '回放格式不对' };
-    }
-    if (!rep || typeof rep !== 'object') return { ok: false, score: 0, reason: '回放为空' };
-    if (!isFinite(rep.end) || rep.end <= 0 || rep.end > MAX_TICKS)
-      return { ok: false, score: 0, reason: '时长不合法' };
-    if (!rep.inputs || rep.inputs.length > MAX_DROPS)
-      return { ok: false, score: 0, reason: '投放次数不合法' };
+    const p = makePlayer(record, parts);
+    if (p.error) return { ok: false, score: 0, reason: p.error };
 
-    const sim = create(rep.seed, parts);
-    let i = 0;
-    const n = rep.inputs.length;
+    while (p.step()) { /* 推到结束为止 */ }
 
-    for (let t = 0; t < rep.end; t++) {
-      while (i < n && rep.inputs[i].t === t) {
-        if (!sim.injectDrop(rep.inputs[i].x, t)) {
-          return { ok: false, score: 0, reason: '投放时机不合法（冷却中或已结束）' };
-        }
-        i++;
-      }
-      if (i < n && rep.inputs[i].t < t) {
-        return { ok: false, score: 0, reason: 'tick 顺序不对' };
-      }
-      if (sim.state.over) break;
-      sim.update();
+    if (p.error) return { ok: false, score: 0, reason: p.error };
+    if (p.consumed < p.total) return { ok: false, score: 0, reason: '有投放没被模拟到' };
+    if (!p.state.over) return { ok: false, score: 0, reason: '回放跑完还没有结束' };
+    if (p.tick !== p.end) {
+      return { ok: false, score: 0, reason: '时长对不上：声称 ' + p.end + '，实际 ' + p.tick };
     }
 
-    if (i < n) return { ok: false, score: 0, reason: '有投放没被模拟到' };
-    if (!sim.state.over) return { ok: false, score: 0, reason: '回放跑完还没有结束' };
-    if (sim.state.tick !== rep.end) {
-      return { ok: false, score: 0, reason: '时长对不上：声称 ' + rep.end + '，实际 ' + sim.state.tick };
+    const got = p.score;
+    if (got !== p.claimed) {
+      return { ok: false, score: got, reason: '分数对不上：声称 ' + p.claimed + '，实际 ' + got };
     }
-
-    const got = sim.state.score;
-    if (got !== rep.score) {
-      return { ok: false, score: got, reason: '分数对不上：声称 ' + rep.score + '，实际 ' + got };
-    }
-    return { ok: true, score: got, reason: '', drops: n, ticks: sim.state.tick };
+    return { ok: true, score: got, reason: '', drops: p.total, ticks: p.tick };
   }
 
   const api = {
@@ -711,7 +774,7 @@
     OVER_LIMIT, MAX_TIER, MAX_BONUS, MERGE_PAD, FIXED, DROP_QUANT,
     MAX_TICKS, MAX_DROPS,
     FRUITS, MERGE_SCORE, SPAWN_TIERS, SPAWN_WEIGHTS, ASSET_FILL,
-    makeRng, create, shapeOf, encode, decode, verify, clamp
+    makeRng, create, shapeOf, encode, decode, makePlayer, verify, clamp
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

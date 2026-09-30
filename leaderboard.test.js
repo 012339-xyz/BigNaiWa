@@ -9,6 +9,8 @@
  *    4. 分数排序 + 「验出来是假的」沉底
  *    5. 真提交走的是带回放的 value
  *    6. 验证队列：跑得出来的 → ✅，跑不出来的 → ❌
+ *    7. 本地存档：一局打完就存、指纹去重、封顶 10 局、
+ *       验证结论回写（没通过的也照样留着，可以重放）
  * ============================================================ */
 'use strict';
 const fs = require('fs'), path = require('path'), vm = require('vm');
@@ -252,6 +254,97 @@ function waitForVerify(list, tries) {
     !!fakeRow.children[3] && fakeRow.children[3].textContent === '❌',
     fakeRow ? ('badge=' + fakeRow.children[3].textContent) : '没找到那行');
 
-  console.log(pass ? '\n排行榜规则自检通过' : '\n排行榜规则自检未通过');
-  process.exit(pass ? 0 : 1);
+  /* ---------- 榜上每行的 ▶ ---------- */
+  console.log('[3b] 榜单行的重放按钮');
+  const rowEls = els.boardList.children
+    .filter(c => c.classList && c.classList.contains('board-row'));
+  const withPlay = rowEls.filter(c => c.children
+    .some(ch => ch.classList && ch.classList.contains('board-play')));
+  check('榜上每一行都带▶（进了榜就一定有回放）',
+    rowEls.length > 0 && withPlay.length === rowEls.length,
+    withPlay.length + '/' + rowEls.length + ' 行有▶');
+
+  const fakeBtn = fakeRow && fakeRow.children
+    .filter(ch => ch.classList && ch.classList.contains('board-play'))[0];
+  check('❌ 那行也有▶，而且更该能点', !!fakeBtn);
+  if (fakeBtn) {
+    const handler = listeners.get(fakeBtn) && listeners.get(fakeBtn).click;
+    const DNW = sandbox.__DNW__;
+    const live = DNW.sim.state;
+    if (handler) handler({ stopPropagation() { } });
+    check('点❌那行的▶能真的开播（没通过校验照样能看）',
+      DNW.mode === 'play' && DNW.state !== live, 'mode=' + DNW.mode);
+    DNW.stopReplay();
+    check('看完能退出，state 切回自己那局', DNW.mode === 'game' && DNW.state === live,
+      'mode=' + DNW.mode);
+  }
+
+  /* ---------- [4] 本地存档（重放按钮的数据源） ---------- */
+  return testSaves().then(function () {
+    console.log(pass ? '\n排行榜规则自检通过' : '\n排行榜规则自检未通过');
+    process.exit(pass ? 0 : 1);
+  }, function (e) {
+    console.log('  [NG] 存档自检抛异常：' + (e && e.stack || e));
+    process.exit(1);
+  });
+}
+
+/* ---------- [4] 本地存档 ---------- */
+function synth(seed, score) {
+  return { v: 2, seed: seed, end: 3600, score: score, inputs: [] };
+}
+function findSave(score) {
+  const list = Board.saves();
+  for (let i = 0; i < list.length; i++) {
+    if (Number(list[i].score) === Number(score)) return list[i];
+  }
+  return null;
+}
+
+function testSaves() {
+  console.log('[4] 本地存档（重放按钮的数据源）');
+  const start = Board.saveCount();
+
+  Board.onGameOver(500, synth(424242, 500));
+  check('一局打完就落一条存档（和提交成不成无关）',
+    Board.saveCount() === start + 1, start + ' → ' + Board.saveCount());
+
+  const raw = JSON.parse(sandbox.localStorage._d['danaiwa.saves.v1'] || '[]');
+  check('存的是能重放的回放字符串',
+    raw.length > 0 && typeof raw[0].r === 'string' && !!Sim.decode(raw[0].r),
+    raw.length ? ('r = ' + raw[0].r.slice(0, 22) + '…') : '存档是空的');
+
+  Board.onGameOver(999999, synth(424242, 999999));
+  check('同一份回放只留一条（指纹去掉了分数段，换分数也没用）',
+    Board.saveCount() === start + 1, '存档数 = ' + Board.saveCount());
+
+  for (let i = 0; i < 14; i++) Board.onGameOver(1000 + i, synth(7000 + i, 1000 + i));
+  check('最多留 10 局', Board.saveCount() === 10, '存档数 = ' + Board.saveCount());
+  check('最新的排在最前', Board.saveAt(0) && Board.saveAt(0).score === 1013,
+    Board.saveAt(0) ? ('第一条 = ' + Board.saveAt(0).score + ' 分') : '空');
+
+  /* 真实的两局：一局验过、一局验不过 —— 结论要能写回存档 */
+  Board.onGameOver(g1.score, g1);
+  Board.onGameOver(g3.score + 8000, {
+    v: 2, seed: g3.seed, end: g3.end, score: g3.score + 8000, inputs: g3.inputs
+  });
+  check('新局挤掉最旧的，真局照样进得来',
+    Board.saveCount() === 10 && !!findSave(g1.score) && !findSave(1000),
+    'g1 在=' + !!findSave(g1.score) + '，最旧的 1000 在=' + !!findSave(1000));
+
+  /* 重读一次榜 → 验证结论要回写到同一份存档上 */
+  return Board.refresh(null).then(function () {
+    const okSave = findSave(g1.score);
+    check('通过验证的存档被标成 ✅', !!okSave && okSave.status === 'ok',
+      okSave ? ('status=' + okSave.status + (okSave.reason ? '（' + okSave.reason + '）' : '')) : '没这条存档');
+
+    const badSave = findSave(g3.score + 8000);
+    check('没通过验证的存档被标成 ❌，而且照样留着',
+      !!badSave && badSave.status === 'bad',
+      badSave ? ('status=' + badSave.status + '，' + badSave.reason) : '没这条存档');
+
+    check('存档里的回放始终能解析（= 随时能重放）',
+      Board.saves().every(s => !!Sim.decode(s.r)),
+      Board.saveCount() + ' 条全部可解析');
+  });
 }
