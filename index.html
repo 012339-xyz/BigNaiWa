@@ -111,7 +111,7 @@
     </div>
     <div class="board-list" id="boardList"></div>
     <footer class="modal-foot">
-      <span class="board-note">只取最近 20 次提交，成绩会被后来的人挤下去</span>
+      <span class="board-note">每条成绩都会重跑一遍回放，分数跑不出来就不算数</span>
       <button class="btn" id="boardRefresh" type="button">刷新</button>
     </footer>
   </div>
@@ -140,9 +140,11 @@
 
 <!-- 碰撞形状数据（按贴图轮廓自动生成，由 tools/build_parts.py 产出） -->
 <script src="assets/fruits/parts.js"></script>
+<!-- 模拟核心（确定性，排行榜靠它重放验证），必须在 game.js 之前 -->
+<script src="sim.js"></script>
 <script src="game.js"></script>
-<!-- 排行榜 -->
-<script src="leaderboard.min.js"></script>
+<!-- 排行榜：存整局回放，读的人自己重跑一遍验证分数 -->
+<script src="leaderboard.js"></script>
 <!-- 赞助作者 -->
 <script src="sponsor.js"></script>
 </body>

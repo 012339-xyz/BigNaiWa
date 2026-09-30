@@ -609,6 +609,43 @@ body {
   outline-offset: -2px;
 }
 
+/* 顶部的「正在重跑验证」提示条 */
+.board-checking {
+  margin: 0 2px 8px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  text-align: center;
+  color: var(--ink-soft);
+  background: rgba(255, 245, 220, .85);
+  animation: board-pulse 1.4s ease-in-out infinite;
+}
+@keyframes board-pulse { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .board-checking { animation: none; } }
+
+/* 验证状态：⏳ 待验证 / ✅ 分数复现成功 / ❌ 跑不出来 */
+.board-verify {
+  flex: 0 0 auto;
+  font-size: 13px;
+  line-height: 1;
+}
+.board-verify.is-ok   { filter: none; }
+.board-verify.is-bad  { filter: none; }
+.board-verify.is-pending { opacity: .55; }
+
+/* 没验出来的成绩：压暗 + 划掉，明确「这个数不算」 */
+.board-row.is-fake {
+  background: #f4f2ef;
+  box-shadow: none;
+}
+.board-row.is-fake .board-name,
+.board-row.is-fake .board-score {
+  text-decoration: line-through;
+  color: var(--ink-soft);
+}
+.board-row.is-fake .board-score { font-weight: 600; }
+.board-row.is-fake .board-rank { opacity: .5; }
+
 .modal-foot {
   display: flex;
   align-items: center;
