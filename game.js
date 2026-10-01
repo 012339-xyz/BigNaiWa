@@ -31,9 +31,9 @@
   const MAX_BONUS = 500;     // 两只神奶蛙相撞的奖励分
                              // （原来是 100 —— 合出全游戏最难的东西只给 100 分，太寒酸；
                              //  而且它同时清掉两块最大的水果、相当于救一条命，值这个价）
-  const MAX_MERGE_GIVES_REVIVE = true;  // 两只神奶蛙一起炸掉时，额外送一次复活机会
+  const MAX_MERGE_GIVES_REVIVE = true;  // 两只神奶蛙一起炸掉时，额外送一枚复活币
   const FREEZE_MS = 130;     // 清场时的定格，让这一下有重量
-  const REVIVE_STEP = 2000;  // 每累计多少分，给一次复活机会
+  const REVIVE_STEP = 2000;  // 每累计多少分，发一枚复活币
   const MERGE_PAD = 0.8;     // 合成判定的接触容差（px）
 
   /* —— Q 弹手感 —— */
@@ -233,7 +233,7 @@
     aimX: W / 2,
     over: false,
     flash: 0,
-    revives: 0,        // 本局还剩几次复活机会（重开清零）
+    revives: 0,        // 本局还剩几枚复活币（重开清零）
     reviveGiven: 0,    // 本局已经发放过几次（用来判断跨过新的 2000 分）
     freeze: 0          // 命中定格剩余秒数
   };
@@ -527,7 +527,7 @@
       const tier = a.tier;
 
       if (tier >= MAX_TIER) {
-        /* 两只神奶蛙 → 一起炸掉，拿一大笔奖励分（外加一次复活机会）。
+        /* 两只神奶蛙 → 一起炸掉，拿一大笔奖励分（外加一枚复活币）。
            注意：它同时清掉了两块最大的水果，是后期唯一的泄压阀，不能取消。
            分数的飘字不用 addScore 那个普通的，下面单独给了「大字 +500」。 */
         addScore(MAX_BONUS);
@@ -595,12 +595,12 @@
     if (state.particles.length > 420) state.particles.splice(0, state.particles.length - 420);
   }
 
-  /* 本局复活徽章：有次数才显示，跨过 2000 分时弹一下 */
+  /* 复活币胶囊：有币才显示，跨过 2000 分时弹一下 */
   function paintRevives(pop) {
     if (!reviveBadge) return;
     if (state.revives > 0) {
       reviveBadge.hidden = false;
-      if (reviveCountEl) reviveCountEl.textContent = '🔄 ×' + state.revives;
+      if (reviveCountEl) reviveCountEl.textContent = '×' + state.revives;
       if (pop) {
         reviveBadge.classList.remove('pop');
         void reviveBadge.offsetWidth;
@@ -612,7 +612,7 @@
     }
   }
 
-  /* 每累计 REVIVE_STEP 分，发一次复活机会 */
+  /* 每累计 REVIVE_STEP 分，发一枚复活币 */
   function grantRevives() {
     let got = 0;
     while (state.reviveGiven < Math.floor(state.score / REVIVE_STEP)) {
@@ -622,7 +622,7 @@
     }
     if (!got) return;
     paintRevives(true);
-    state.floats.push({ x: W / 2, y: 210, text: '+1 复活', life: 1.4, big: true });
+    state.floats.push({ x: W / 2, y: 210, text: '+1 复活币', life: 1.4, big: true });
     Sound.merge(6);
   }
 
@@ -720,10 +720,10 @@
     }
   }
 
-  /* 越线那一屏：有复活机会就先问一句 */
+  /* 越线那一屏：有复活币就先问一句 */
   function askRevive() {
     if (reviveScoreEl) reviveScoreEl.textContent = state.score;
-    if (reviveLeftEl) reviveLeftEl.textContent = '还剩 ' + state.revives + ' 次';
+    if (reviveLeftEl) reviveLeftEl.textContent = '还剩 ' + state.revives + ' 枚';
     if (revivePromptEl) revivePromptEl.hidden = false;
     if (overPanelEl) overPanelEl.hidden = true;
     if (overlayEl) overlayEl.classList.add('show');
@@ -784,7 +784,7 @@
     state.flash = 0;
     state.danger = false;
     state.aimX = W / 2;
-    state.revives = 0;        // 复活机会只在本局有效，重开清零
+    state.revives = 0;        // 复活币只在本局有效，重开清零
     state.reviveGiven = 0;
     state.freeze = 0;
     state.pending = pickSpawnTier();

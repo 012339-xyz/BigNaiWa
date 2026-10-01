@@ -298,19 +298,38 @@ body {
 
 .stat-best { color: #e79a1f; }
 
-/* 本局复活机会：占满一行，只在有次数时出现（显隐由 JS 控制） */
-.stat-revive { grid-column: 1 / -1; }
-
-.stat-revive-val {
-  font-size: 17px;
-  color: #d2691e;
+/* 复活币：浮在棋盘左上角的小胶囊。
+   刻意不放进 .stats —— 手机上面板是横向 flex，多一个卡片会把分数卡挤到
+   52px 宽还折行（实测面板从 66px 涨到 102px，整个版式被顶开）。 */
+.revive-chip {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  color: #6a3c00;
+  background: linear-gradient(135deg, #ffe6a3, #ffc247);
+  box-shadow: 0 3px 10px rgba(200, 130, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .75);
+  pointer-events: none;          /* 绝不挡住投放 */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-.stat-revive.pop { animation: revivePop .5s cubic-bezier(.2, .9, .3, 1.5); }
+.revive-chip-ico { font-size: 12px; }
+
+.revive-chip.pop { animation: revivePop .5s cubic-bezier(.2, .9, .3, 1.5); }
 
 @keyframes revivePop {
   0%   { transform: scale(1); }
-  45%  { transform: scale(1.07); box-shadow: 0 6px 20px rgba(231, 154, 31, .45); }
+  45%  { transform: scale(1.22); box-shadow: 0 6px 18px rgba(200, 130, 0, .5); }
   100% { transform: scale(1); }
 }
 
@@ -338,7 +357,7 @@ body {
   box-shadow: inset 0 0 0 1px rgba(214, 160, 96, .25);
 }
 
-/* 「用一次复活」：青绿色，跟珊瑚红的主按钮区分开 */
+/* 「用一枚复活币」：青绿色，跟珊瑚红的主按钮区分开 */
 .btn.btn-revive {
   color: #fff;
   border-color: transparent;
@@ -349,7 +368,7 @@ body {
 .btn.btn-revive:hover { box-shadow: 0 12px 26px rgba(35, 177, 131, .46); }
 
 @media (prefers-reduced-motion: reduce) {
-  .stat-revive.pop { animation: none; }
+  .revive-chip.pop { animation: none; }
 }
 
 .stat-value.bump { animation: bump .32s ease; }

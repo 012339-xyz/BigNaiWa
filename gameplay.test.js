@@ -3,11 +3,11 @@
  *  运行：node gameplay.test.js
  *
  *  覆盖：
- *    · 每累计 2000 分发一次复活机会（跨阈值、不重复发、可累计）
- *    · 复活机会只在本局有效，reset() 清零
+ *    · 每累计 2000 分发一枚复活币（跨阈值、不重复发、可累计）
+ *    · 复活币只在本局有效，reset() 清零
  *    · 越线时有次数才弹询问屏，没次数直接结算
  *    · revive()：消耗一次、清掉警戒线以上的水果、解除判负、没次数返回 false
- *    · 两只神奶蛙相撞：一起消失、+500、大字飘分、定格、额外送一次复活
+ *    · 两只神奶蛙相撞：一起消失、+500、大字飘分、定格、额外送一枚复活币
  * ============================================================ */
 'use strict';
 const fs = require('fs'), path = require('path'), vm = require('vm');
@@ -102,7 +102,7 @@ const ball = (y, r) => ({ x: 200, y, r: r || 30, dead: false, landed: true, over
 console.log('玩法自检：复活 + 清场\n');
 
 /* ---------- A. 复活发放 ---------- */
-console.log('[A] 每 2000 分发一次复活');
+console.log('[A] 每 2000 分发一枚复活币');
 G.reset();
 eq(G.state.revives, 0, '开局 0 次');
 G.addScore(1999);
@@ -117,10 +117,10 @@ G.addScore(2500);
 eq(G.state.revives, 3, '一次跨两个阈值（6500 分）→ 3 次');
 eq(G.state.reviveGiven, 3, '已发放次数对得上');
 eq(els.reviveBadge.hidden, false, '徽章显示出来了');
-eq(els.reviveCount.textContent, '🔄 ×3', '徽章文案正确');
+eq(els.reviveCount.textContent, '×3', '胶囊文案正确');
 
 /* ---------- B. 只在本局有效 ---------- */
-console.log('\n[B] 复活机会只在本局有效');
+console.log('\n[B] 复活币只在本局有效');
 G.reset();
 eq(G.state.revives, 0, '重开后清零');
 eq(G.state.reviveGiven, 0, '发放记录也清零');
@@ -145,7 +145,7 @@ G.gameOver();
 eq(els.revivePrompt.hidden, false, '有次数 → 弹询问屏');
 eq(els.overPanel.hidden, true, '结算屏让位');
 eq(els.reviveScore.textContent, 2000, '询问屏显示本局得分');
-eq(els.reviveLeft.textContent, '还剩 1 次', '显示剩余次数');
+eq(els.reviveLeft.textContent, '还剩 1 枚', '显示剩余枚数');
 eq(gameOverCalls, 0, '还没提交成绩');
 
 /* ---------- D. revive() 本身 ---------- */
@@ -191,7 +191,7 @@ eq(bigFloat.length, 1, '有且只有一个大字飘分（不会和普通飘字�
 eq(bigFloat[0].text, '+500', '大字写的是 +500');
 eq(G.state.floats.length, 2, '一共就两行飘字：大字 +500、小字说明');
 ok(G.state.floats.some((f) => f.text.indexOf('两个神奶蛙') >= 0), '还有一行「两个神奶蛙」说明文字');
-eq(G.state.revives, 1, '额外送了一次复活机会');
+eq(G.state.revives, 1, '额外送了一枚复活币');
 eq(els.reviveBadge.hidden, false, '徽章就此出现');
 
 /* ---------- F. 定格会自己结束，不会卡死 ---------- */
