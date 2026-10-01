@@ -94,9 +94,10 @@ python -m http.server 8080
 | `game.js` | 游戏逻辑 + 自研物理 + Canvas 渲染 + WebAudio 音效 |
 | `leaderboard.min.js` | 在线排行榜的构建产物（TinyWebDB 接口 + 弹窗渲染），页面直接引用它 |
 | `sponsor.js` | 结算页「赞助作者」弹窗（展示微信收款码），纯静态、无网络请求 |
-| `assets/fruits/` | 水果贴图：`*.png` 是 512×512 的源图，页面实际加载的是 `*.webp` + `parts.js` 碰撞形状 |
+| `assets/fruits/` | 水果贴图：`*.png` 是 512×512 的源图，页面实际加载的是 `*.webp`；另有 `parts.js` 碰撞形状、`blur.js` 极模糊占位图 |
 | `tools/normalize_assets.py` | 素材统一脚本：抠底、去噪、统一画布、烤暗边 |
 | `tools/optimize_sprites.py` | 把源图压成 WebP 并裁到每级实际需要的尺寸（1.45 MB → 0.19 MB） |
+| `tools/make_blur.py` | 生成极模糊占位图 `blur.js`（11 张缩略图拼成一条、内联成 data URL，约 8 KB） |
 | `tools/build_parts.py` | 按贴图轮廓生成碰撞形状，产出 `assets/fruits/parts.js` |
 | `src/` | 原始素材（11 张，格式/尺寸/底色都不统一），只作为脚本输入 |
 | `physics.test.js` | 物理手感自检脚本（`node physics.test.js`） |
@@ -226,7 +227,18 @@ python tools/optimize_sprites.py --lossless # 想完全无损就用这个（0.59
 碰撞形状是按源图 alpha 算的，所以还要跑一次 `tools/build_parts.py`。
 
 另外 `game.js` 的 `loadSprites()` 对每张图**失败会退避重试 3 次**（弱网下一次拉不到很常见），
-全部失败才回退成程序化水果，不影响玩。
+全部失败才回退，不影响玩。
+
+**回退顺序是三级**，别让玩家看到"图挂了"：
+
+1. 贴图到位 → 正常画
+2. 还没到 / 失败了 → 画 `blur.js` 里那张**极模糊的同形状缩略图**（内联 data URL，零请求），
+   观感是"图正在慢慢变清晰"
+3. 连 `blur.js` 都没有（被拦了）→ 才画程序化的圆形水果（那堆卡通脸）
+
+```bash
+python tools/make_blur.py     # 换了贴图之后跑一次，重新生成 blur.js
+```
 
 换图的两种方式：
 

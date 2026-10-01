@@ -826,7 +826,21 @@
       return;
     }
 
-    /* —— 兜底：贴图没加载出来时，画程序化的圆形水果 —— */
+    /* —— 兜底一：贴图还没到位时，先画一张极模糊的同形状缩略图 ——
+       观感是「图正在慢慢变清晰」，而不是「图挂了」看到一堆卡通脸。
+       这张缩略图是内联的 data URL（assets/fruits/blur.js，约 8KB），不走网络。 */
+    if (blurImg && blurCfg && blurCfg.cols > 0) {
+      const idx = tier < blurCfg.cols ? tier : blurCfg.cols - 1;
+      const box = (r * 2) / ASSET_FILL;
+      const cell = blurCfg.cell;
+      c.imageSmoothingEnabled = true;
+      if ('imageSmoothingQuality' in c) c.imageSmoothingQuality = 'high';
+      c.drawImage(blurImg, idx * cell, 0, cell, cell, -box / 2, -box / 2, box, box);
+      c.restore();
+      return;
+    }
+
+    /* —— 兜底二：连缩略图都没有（blur.js 被拦了）才画程序化的圆形水果 —— */
     /* 主体 */
     const g = c.createRadialGradient(-r * 0.34, -r * 0.40, r * 0.12, 0, 0, r * 1.12);
     g.addColorStop(0, f.c1);
@@ -1286,6 +1300,16 @@
        3) 全部失败也不影响玩，只是回退成程序化水果。 */
   const SPRITE_RETRY = 3;      // 每个素材最多试几次
 
+  let blurImg = null;          // 极模糊占位图（内联 data URL，秒到）
+  const blurCfg = window.FRUIT_BLUR || null;
+
+  function loadBlur() {
+    if (!blurCfg || !blurCfg.src) return;
+    const im = new Image();
+    im.onload = () => { blurImg = im; };
+    im.src = blurCfg.src;
+  }
+
   function loadSprites() {
     let left = 0;
 
@@ -1348,6 +1372,7 @@
 
     drawChain();
     reset();
+    loadBlur();             // 占位图是内联的，几乎立刻可用
     loadSprites();          // 贴图异步到位，到了会自动重画预览
     requestAnimationFrame((t) => { last = t; requestAnimationFrame(frame); });
   }
@@ -1361,5 +1386,6 @@
   /* 调试句柄（控制台可用）：__DNW__.state / .reset() / .drop() / .FRUITS / .render() */
   window.__DNW__ = { state, reset, revive, settle, gameOver, tryDrop, stepPhysics, update, FRUITS,
                      render, resizeCanvas, shapeOf, makeBall, paintRevives, addScore,
-                     MAX_BONUS, REVIVE_STEP };
+                     MAX_BONUS, REVIVE_STEP,
+                     blurReady: () => !!blurImg };
 })();
