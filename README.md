@@ -94,11 +94,13 @@ python -m http.server 8080
 | `game.js` | 游戏逻辑 + 自研物理 + Canvas 渲染 + WebAudio 音效 |
 | `leaderboard.min.js` | 在线排行榜的构建产物（TinyWebDB 接口 + 弹窗渲染），页面直接引用它 |
 | `sponsor.js` | 结算页「赞助作者」弹窗（展示微信收款码），纯静态、无网络请求 |
-| `assets/fruits/` | 11 张统一后的水果贴图（512×512 PNG，透明底）+ `parts.js` 碰撞形状 |
+| `assets/fruits/` | 水果贴图：`*.png` 是 512×512 的源图，页面实际加载的是 `*.webp` + `parts.js` 碰撞形状 |
 | `tools/normalize_assets.py` | 素材统一脚本：抠底、去噪、统一画布、烤暗边 |
+| `tools/optimize_sprites.py` | 把源图压成 WebP 并裁到每级实际需要的尺寸（1.45 MB → 0.19 MB） |
 | `tools/build_parts.py` | 按贴图轮廓生成碰撞形状，产出 `assets/fruits/parts.js` |
 | `src/` | 原始素材（11 张，格式/尺寸/底色都不统一），只作为脚本输入 |
 | `physics.test.js` | 物理手感自检脚本（`node physics.test.js`） |
+| `gameplay.test.js` | 复活 / 清场玩法自检（`node gameplay.test.js`） |
 | `preview.png` | 预览图 |
 
 ## 排行榜
@@ -208,7 +210,23 @@ python tools/build_parts.py --max-parts 16 --preview
 07-peach       08-pineapple 09-coconut  10-halfmelon 11-watermelon
 ```
 
-规格：**512×512 正方形、PNG-32 透明底、主体居中占长边 92%**，贴图会跟着水果一起滚动/旋转。
+规格：**正方形、透明底、主体居中占长边 92%**，贴图会跟着水果一起滚动/旋转。
+
+**页面加载的是 `.webp`，`.png` 只是给工具用的源图。** 源图统一是 512×512，但打包时会按每一级
+在游戏里的实际显示尺寸裁到刚好（最小的葡萄只要 76×76），再用有损 WebP q88 压一遍：
+**1.45 MB → 0.19 MB**。这一步不能省 —— 贴图一共才 11 张，原来在慢网下要好几秒才出图，
+这几秒里玩家看到的是兜底的程序化水果（一堆卡通脸），反馈就是"图挂了"。
+
+```bash
+python tools/optimize_sprites.py            # 默认 q88，会打印每一张的体积对比
+python tools/optimize_sprites.py --lossless # 想完全无损就用这个（0.59 MB）
+```
+
+换完贴图后注意两点：跑一次 `optimize_sprites.py` 生成新的 `.webp`；
+碰撞形状是按源图 alpha 算的，所以还要跑一次 `tools/build_parts.py`。
+
+另外 `game.js` 的 `loadSprites()` 对每张图**失败会退避重试 3 次**（弱网下一次拉不到很常见），
+全部失败才回退成程序化水果，不影响玩。
 
 换图的两种方式：
 
