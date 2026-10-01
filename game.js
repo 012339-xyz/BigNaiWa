@@ -595,12 +595,13 @@
     if (state.particles.length > 420) state.particles.splice(0, state.particles.length - 420);
   }
 
-  /* 复活币胶囊：有币才显示，跨过 2000 分时弹一下 */
+  /* 复活币胶囊：有币才显示，跨过 2000 分时弹一下。
+     注意 0 枚时也要把文字刷成 ×0 —— 否则下次显示出来的是上一次的旧数字。 */
   function paintRevives(pop) {
     if (!reviveBadge) return;
+    if (reviveCountEl) reviveCountEl.textContent = '×' + state.revives;
     if (state.revives > 0) {
       reviveBadge.hidden = false;
-      if (reviveCountEl) reviveCountEl.textContent = '×' + state.revives;
       if (pop) {
         reviveBadge.classList.remove('pop');
         void reviveBadge.offsetWidth;

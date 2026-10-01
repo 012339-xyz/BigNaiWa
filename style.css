@@ -25,6 +25,12 @@
 
 * { box-sizing: border-box; }
 
+/* hidden 属性必须真的隐藏。
+   浏览器默认只给 [hidden] { display: none }（权重 0,1,0），
+   一旦某个类也写了 display（比如 .revive-chip { display: inline-flex }），
+   同权重、后写的赢 —— hidden 就静默失效了，元素还挂在那儿。 */
+[hidden] { display: none !important; }
+
 html, body {
   height: 100%;
   overscroll-behavior: none;   /* 禁掉下拉刷新 / 橡皮筋 */
