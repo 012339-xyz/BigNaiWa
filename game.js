@@ -1,5 +1,5 @@
 /* ============================================================
- *  合成大西瓜 · Suika Game
+ *  合成大奶娃 · Suika Game
  *  纯原生 HTML + CSS + JavaScript，无任何依赖。
  *
  *  物理：PBD（位置约束求解）—— 3 个子步 × 6 次迭代，
@@ -27,8 +27,13 @@
   const REST_SPEED = 140;    // 线上方且速度低于它才算“卡住”（被弹飞路过的不算）
   const REST_SPEED2 = REST_SPEED * REST_SPEED;
 
-  const MAX_TIER  = 10;      // 大西瓜的索引
-  const MAX_BONUS = 100;     // 两个大西瓜相撞的奖励分
+  const MAX_TIER  = 10;      // 最大那只（神奶蛙）的索引
+  const MAX_BONUS = 500;     // 两只神奶蛙相撞的奖励分
+                             // （原来是 100 —— 合出全游戏最难的东西只给 100 分，太寒酸；
+                             //  而且它同时清掉两块最大的水果、相当于救一条命，值这个价）
+  const MAX_MERGE_GIVES_REVIVE = true;  // 两只神奶蛙一起炸掉时，额外送一次复活机会
+  const FREEZE_MS = 130;     // 清场时的定格，让这一下有重量
+  const REVIVE_STEP = 2000;  // 每累计多少分，给一次复活机会
   const MERGE_PAD = 0.8;     // 合成判定的接触容差（px）
 
   /* —— Q 弹手感 —— */
@@ -64,9 +69,9 @@
       file: 'assets/fruits/08-pineapple.png', pc1: '#ffd37b', pc2: '#d1a252' },
     { name: '椰子',   r: 94,  c1: '#f0e2c6', c2: '#9b7b4f', line: 'rgba(90,64,32,.35)',
       file: 'assets/fruits/09-coconut.png',   pc1: '#ffd771', pc2: '#d3a94e' },
-    { name: '半西瓜', r: 108, c1: '#ff9d78', c2: '#c23a2c', line: 'rgba(120,24,16,.32)',
+    { name: '半奶蛙', r: 108, c1: '#ff9d78', c2: '#c23a2c', line: 'rgba(120,24,16,.32)',
       file: 'assets/fruits/10-halfmelon.png', pc1: '#ccab68', pc2: '#9c8047' },
-    { name: '大西瓜', r: 124, c1: '#7ce878', c2: '#1c8a33', line: 'rgba(12,70,24,.4)',
+    { name: '神奶蛙', r: 124, c1: '#7ce878', c2: '#1c8a33', line: 'rgba(12,70,24,.4)',
       file: 'assets/fruits/11-watermelon.png', pc1: '#eece9b', pc2: '#c0a271' }
   ];
 
@@ -87,7 +92,6 @@
   const canvas    = document.getElementById('game');
   const ctx       = canvas.getContext('2d');
   const stage     = document.getElementById('stage');
-  const overlay   = document.getElementById('overlay');
   const scoreEl   = document.getElementById('score');
   const bestEl    = document.getElementById('best');
   const finalScoreEl = document.getElementById('finalScore');
@@ -99,6 +103,15 @@
   const soundBtn   = document.getElementById('soundBtn');
   const resetBtn   = document.getElementById('resetBtn');
   const restartBtn = document.getElementById('restartBtn');
+  const overlayEl     = document.getElementById('overlay');
+  const revivePromptEl = document.getElementById('revivePrompt');
+  const overPanelEl    = document.getElementById('overPanel');
+  const reviveScoreEl  = document.getElementById('reviveScore');
+  const reviveLeftEl   = document.getElementById('reviveLeft');
+  const reviveBtn      = document.getElementById('reviveBtn');
+  const giveUpBtn      = document.getElementById('giveUpBtn');
+  const reviveBadge    = document.getElementById('reviveBadge');
+  const reviveCountEl  = document.getElementById('reviveCount');
 
   /* ---------------------------------------------------------
    *  工具
@@ -219,7 +232,10 @@
     cooldown: 0,
     aimX: W / 2,
     over: false,
-    flash: 0
+    flash: 0,
+    revives: 0,        // 本局还剩几次复活机会（重开清零）
+    reviveGiven: 0,    // 本局已经发放过几次（用来判断跨过新的 2000 分）
+    freeze: 0          // 命中定格剩余秒数
   };
 
   /* ---------------------------------------------------------
@@ -511,12 +527,22 @@
       const tier = a.tier;
 
       if (tier >= MAX_TIER) {
-        /* 两个大西瓜 → 一起消失，拿奖励分 */
-        addScore(MAX_BONUS, mx, my, '+' + MAX_BONUS);
-        burst(mx, my, MAX_TIER, 34, 380);
+        /* 两只神奶蛙 → 一起炸掉，拿一大笔奖励分（外加一次复活机会）。
+           注意：它同时清掉了两块最大的水果，是后期唯一的泄压阀，不能取消。
+           分数的飘字不用 addScore 那个普通的，下面单独给了「大字 +500」。 */
+        addScore(MAX_BONUS);
+        burst(mx, my, MAX_TIER, 90, 560);
+        burst(mx, my, MAX_TIER - 2, 42, 340);
         Sound.bonus();
-        haptic(40);
-        state.flash = 1;
+        haptic(70);
+        state.flash = 1.4;                    // 比普通合成更亮的全屏闪
+        state.freeze = FREEZE_MS / 1000;      // 定格一下，让这一下有重量
+        state.floats.push({ x: mx, y: my - 74, text: '两个神奶蛙 💥', life: 1.6 });
+        state.floats.push({ x: mx, y: my - 16, text: '+' + MAX_BONUS, life: 2.2, big: true });
+        if (MAX_MERGE_GIVES_REVIVE) {
+          state.revives++;
+          paintRevives(true);
+        }
       } else {
         const nt = tier + 1;
         const nb = makeBall(mx, my, nt, (a.vx + b.vx) * 0.5, (a.vy + b.vy) * 0.5 - 60);
@@ -569,6 +595,37 @@
     if (state.particles.length > 420) state.particles.splice(0, state.particles.length - 420);
   }
 
+  /* 本局复活徽章：有次数才显示，跨过 2000 分时弹一下 */
+  function paintRevives(pop) {
+    if (!reviveBadge) return;
+    if (state.revives > 0) {
+      reviveBadge.hidden = false;
+      if (reviveCountEl) reviveCountEl.textContent = '🔄 ×' + state.revives;
+      if (pop) {
+        reviveBadge.classList.remove('pop');
+        void reviveBadge.offsetWidth;
+        reviveBadge.classList.add('pop');
+      }
+    } else {
+      reviveBadge.hidden = true;
+      reviveBadge.classList.remove('pop');
+    }
+  }
+
+  /* 每累计 REVIVE_STEP 分，发一次复活机会 */
+  function grantRevives() {
+    let got = 0;
+    while (state.reviveGiven < Math.floor(state.score / REVIVE_STEP)) {
+      state.reviveGiven++;
+      state.revives++;
+      got++;
+    }
+    if (!got) return;
+    paintRevives(true);
+    state.floats.push({ x: W / 2, y: 210, text: '+1 复活', life: 1.4, big: true });
+    Sound.merge(6);
+  }
+
   function addScore(n, x, y, text) {
     state.score += n;
     if (state.score > state.best) {
@@ -581,6 +638,7 @@
     if (x !== undefined) {
       state.floats.push({ x, y, text: text || ('+' + n), life: 1 });
     }
+    grantRevives();
   }
 
   function bump(el) {
@@ -651,16 +709,68 @@
     state.danger = danger;
   }
 
-  function gameOver() {
-    state.over = true;
-    finalScoreEl.textContent = state.score;
-    finalBestEl.textContent = state.best;
-    overlay.classList.add('show');
-    Sound.over();
+  /* 正式结算：弹结算窗 + 把成绩交给排行榜 */
+  function settle() {
+    if (revivePromptEl) revivePromptEl.hidden = true;
+    if (overPanelEl) overPanelEl.hidden = false;
+    if (overlayEl) overlayEl.classList.add('show');
     /* 交给排行榜模块（没加载也不影响） */
     if (window.DanaiwaBoard && window.DanaiwaBoard.onGameOver) {
       window.DanaiwaBoard.onGameOver(state.score);
     }
+  }
+
+  /* 越线那一屏：有复活机会就先问一句 */
+  function askRevive() {
+    if (reviveScoreEl) reviveScoreEl.textContent = state.score;
+    if (reviveLeftEl) reviveLeftEl.textContent = '还剩 ' + state.revives + ' 次';
+    if (revivePromptEl) revivePromptEl.hidden = false;
+    if (overPanelEl) overPanelEl.hidden = true;
+    if (overlayEl) overlayEl.classList.add('show');
+  }
+
+  function gameOver() {
+    state.over = true;
+    finalScoreEl.textContent = state.score;
+    finalBestEl.textContent = state.best;
+    Sound.over();
+    if (state.revives > 0) { askRevive(); return; }
+    settle();
+  }
+
+  /* 复活：消除最顶上那颗，再把仍压在警戒线以上的清掉（只清一颗的话会立刻再输），
+     然后接着玩。返回 false 表示当前不能复活。 */
+  function revive() {
+    if (!state.over || state.revives <= 0) return false;
+
+    /* 1) 找最顶上的：按「上边缘」比，最小的最靠上 */
+    let top = -1;
+    let topEdge = Infinity;
+    for (let i = 0; i < state.balls.length; i++) {
+      const b = state.balls[i];
+      if (b.dead) continue;
+      const edge = b.y - b.r;
+      if (edge < topEdge) { topEdge = edge; top = i; }
+    }
+    if (top >= 0) state.balls.splice(top, 1);
+
+    /* 2) 还压在警戒线以上的，一并清掉 */
+    state.balls = state.balls.filter((b) => !b.dead && (b.y - b.r) >= DANGER_Y + 6);
+
+    /* 越线计时清零，给玩家一个反应窗口 */
+    for (let i = 0; i < state.balls.length; i++) state.balls[i].overTime = 0;
+
+    state.revives--;
+    state.over = false;
+    state.danger = false;
+    state.ready = true;
+    state.cooldown = 0;
+    state.flash = 0.6;               // 闪一下，让玩家知道救回来了
+    if (revivePromptEl) revivePromptEl.hidden = true;
+    if (overlayEl) overlayEl.classList.remove('show');
+    paintRevives(false);
+    Sound.ensure();
+    return true;
   }
 
   function reset() {
@@ -674,9 +784,15 @@
     state.flash = 0;
     state.danger = false;
     state.aimX = W / 2;
+    state.revives = 0;        // 复活机会只在本局有效，重开清零
+    state.reviveGiven = 0;
+    state.freeze = 0;
     state.pending = pickSpawnTier();
     state.next = pickSpawnTier(state.pending);
-    overlay.classList.remove('show');
+    if (overlayEl) overlayEl.classList.remove('show');
+    if (revivePromptEl) revivePromptEl.hidden = true;
+    if (overPanelEl) overPanelEl.hidden = false;
+    paintRevives(false);
     scoreEl.textContent = '0';
     bestEl.textContent = state.best;
     drawNext();
@@ -720,7 +836,7 @@
     c.fillStyle = g;
     c.fill();
 
-    /* 半西瓜 / 大西瓜 的纹理 */
+    /* 半奶蛙 / 神奶蛙 的纹理 */
     if (tier === MAX_TIER) {
       c.save();
       c.beginPath();
@@ -923,17 +1039,20 @@
 
     /* 飘分 */
     ctx.textAlign = 'center';
-    ctx.font = '700 20px "PingFang SC", "Microsoft YaHei", system-ui, sans-serif';
     for (let i = state.floats.length - 1; i >= 0; i--) {
       const f = state.floats[i];
-      f.y -= 46 * dt;
-      f.life -= dt * 1.05;
+      const big = !!f.big;
+      f.y -= (big ? 24 : 46) * dt;
+      f.life -= dt * (big ? 0.55 : 1.05);
       if (f.life <= 0) { state.floats.splice(i, 1); continue; }
       ctx.globalAlpha = Math.min(1, f.life * 1.4);
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = 'rgba(255,255,255,.9)';
+      ctx.font = big
+        ? '900 40px "PingFang SC", "Microsoft YaHei", system-ui, sans-serif'
+        : '700 20px "PingFang SC", "Microsoft YaHei", system-ui, sans-serif';
+      ctx.lineWidth = big ? 9 : 4;
+      ctx.strokeStyle = 'rgba(255,255,255,.95)';
       ctx.strokeText(f.text, f.x, f.y);
-      ctx.fillStyle = '#f4623a';
+      ctx.fillStyle = big ? '#e8342f' : '#f4623a';
       ctx.fillText(f.text, f.x, f.y);
     }
     ctx.globalAlpha = 1;
@@ -1027,6 +1146,9 @@
   }
 
   function update(dt) {
+    /* 清场命中定格：世界停一下，但画面照常重绘 */
+    if (state.freeze > 0) { state.freeze = Math.max(0, state.freeze - dt); return; }
+
     if (state.over) return;          // 结束后冻结棋盘（粒子特效仍在 render 里继续）
 
     if (!state.ready) {
@@ -1049,7 +1171,8 @@
     drawBoard();
     drawBalls();
     drawAim();
-    drawEffects(dt);
+    /* 定格期间把特效的 dt 也压成 0，让它跟世界一起停住 */
+    drawEffects(state.freeze > 0 ? 0 : dt);
 
     if (state.flash > 0) {
       ctx.save();
@@ -1202,6 +1325,10 @@
 
     paintSoundBtn();
 
+    /* 越线那一屏的两个按钮 */
+    if (reviveBtn) reviveBtn.addEventListener('click', revive);
+    if (giveUpBtn) giveUpBtn.addEventListener('click', settle);
+
     drawChain();
     reset();
     loadSprites();          // 贴图异步到位，到了会自动重画预览
@@ -1215,5 +1342,7 @@
   }
 
   /* 调试句柄（控制台可用）：__DNW__.state / .reset() / .drop() / .FRUITS / .render() */
-  window.__DNW__ = { state, reset, tryDrop, stepPhysics, FRUITS, render, resizeCanvas, shapeOf, makeBall };
+  window.__DNW__ = { state, reset, revive, settle, gameOver, tryDrop, stepPhysics, update, FRUITS,
+                     render, resizeCanvas, shapeOf, makeBall, paintRevives, addScore,
+                     MAX_BONUS, REVIVE_STEP };
 })();

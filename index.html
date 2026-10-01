@@ -24,25 +24,43 @@
 
     <div class="overlay" id="overlay">
       <div class="dialog">
-        <div class="dialog-emoji">🍉</div>
-        <h2 id="overTitle">游戏结束</h2>
-        <p class="dialog-score">本局得分 <strong id="finalScore">0</strong></p>
-        <p class="dialog-best">最高分 <span id="finalBest">0</span></p>
 
-        <div class="submit-box" id="submitBox">
-          <p class="submit-msg" id="submitMsg">正在结算…</p>
-          <p class="my-name">昵称：<strong id="myNameLabel">默认用户</strong>
-            <button class="link-btn" id="editNameBtn" type="button">改昵称</button>
-          </p>
-          <button class="btn" id="submitBtn" type="button" hidden>重试提交</button>
+        <!-- ===== 越线第一屏：有复活机会时才出现 ===== -->
+        <div class="revive-ask" id="revivePrompt" hidden>
+          <div class="dialog-emoji">😵</div>
+          <h2>还能再救一下</h2>
+          <p class="dialog-score">本局得分 <strong id="reviveScore">0</strong></p>
+          <p class="revive-hint">清掉警戒线以上的水果，接着玩</p>
+          <div class="dialog-actions">
+            <button class="btn" id="giveUpBtn" type="button">不了，结束吧</button>
+            <button class="btn btn-revive" id="reviveBtn" type="button">🔄 用一次复活</button>
+          </div>
+          <p class="dialog-hint" id="reviveLeft">还剩 1 次</p>
         </div>
 
-        <div class="dialog-actions">
-          <button class="btn" id="boardBtn2" type="button">🏆 排行榜</button>
-          <button class="btn btn-primary" id="restartBtn" type="button">再来一局</button>
-          <button class="btn btn-sponsor btn-wide" id="sponsorBtn" type="button">🌶️ 可以赏作者一包辣条嘛</button>
+        <!-- ===== 第二屏：正式结算 ===== -->
+        <div id="overPanel">
+          <div class="dialog-emoji">🍉</div>
+          <h2 id="overTitle">游戏结束</h2>
+          <p class="dialog-score">本局得分 <strong id="finalScore">0</strong></p>
+          <p class="dialog-best">最高分 <span id="finalBest">0</span></p>
+
+          <div class="submit-box" id="submitBox">
+            <p class="submit-msg" id="submitMsg">正在结算…</p>
+            <p class="my-name">昵称：<strong id="myNameLabel">默认用户</strong>
+              <button class="link-btn" id="editNameBtn" type="button">改昵称</button>
+            </p>
+            <button class="btn" id="submitBtn" type="button" hidden>重试提交</button>
+          </div>
+
+          <div class="dialog-actions">
+            <button class="btn" id="boardBtn2" type="button">🏆 排行榜</button>
+            <button class="btn btn-primary" id="restartBtn" type="button">再来一局</button>
+            <button class="btn btn-sponsor btn-wide" id="sponsorBtn" type="button">🌶️ 可以赏作者一包辣条嘛</button>
+          </div>
+          <p class="dialog-hint">按 R 键也可重新开始</p>
         </div>
-        <p class="dialog-hint">按 R 键也可重新开始</p>
+
       </div>
     </div>
   </section>
@@ -64,6 +82,10 @@
         <span class="stat-label">最高分</span>
         <strong class="stat-value stat-best" id="best">0</strong>
       </div>
+      <div class="stat stat-revive" id="reviveBadge" hidden>
+        <span class="stat-label">本局复活</span>
+        <strong class="stat-value stat-revive-val" id="reviveCount">🔄 ×0</strong>
+      </div>
     </div>
 
     <div class="next-box">
@@ -74,6 +96,7 @@
     <div class="chain-box">
       <span class="box-label">合成表</span>
       <canvas id="chain" width="680" height="112" aria-label="合成顺序"></canvas>
+      <p class="chain-note">✨ 两个神奶蛙撞在一起会一起炸掉，换 <strong>500 分</strong> + <strong>一次复活</strong></p>
     </div>
 
     <div class="actions">
@@ -90,7 +113,8 @@
 
     <p class="tips">
       鼠标：移动瞄准、点击投放；触屏：拖动瞄准、松手投放。<br>
-      ← → 微调位置，空格投放，R 重开。
+      ← → 微调位置，空格投放，R 重开。<br>
+      每 <strong>2000 分</strong>攒一次复活机会，只在本局有效。
     </p>
 
   </aside>

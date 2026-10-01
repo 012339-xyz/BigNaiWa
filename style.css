@@ -1,5 +1,5 @@
 /* ============================================================
-   合成大西瓜 · 样式表
+   合成大奶娃 · 样式表
    ============================================================ */
 
 :root {
@@ -297,6 +297,60 @@ body {
 }
 
 .stat-best { color: #e79a1f; }
+
+/* 本局复活机会：占满一行，只在有次数时出现（显隐由 JS 控制） */
+.stat-revive { grid-column: 1 / -1; }
+
+.stat-revive-val {
+  font-size: 17px;
+  color: #d2691e;
+}
+
+.stat-revive.pop { animation: revivePop .5s cubic-bezier(.2, .9, .3, 1.5); }
+
+@keyframes revivePop {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.07); box-shadow: 0 6px 20px rgba(231, 154, 31, .45); }
+  100% { transform: scale(1); }
+}
+
+/* 合成表底下那行规则说明 */
+.chain-note {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--ink-soft);
+}
+.chain-note strong { color: #c8601a; }
+
+/* 越线那一屏 */
+.revive-ask .dialog-score { margin-bottom: 10px; }
+
+.revive-hint {
+  margin: 0 0 18px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #7a4a12;
+  background: rgba(255, 233, 190, .8);
+  box-shadow: inset 0 0 0 1px rgba(214, 160, 96, .25);
+}
+
+/* 「用一次复活」：青绿色，跟珊瑚红的主按钮区分开 */
+.btn.btn-revive {
+  color: #fff;
+  border-color: transparent;
+  font-weight: 700;
+  background: linear-gradient(135deg, #4fd1a5, #23b183 55%, #14946a);
+  box-shadow: 0 8px 20px rgba(35, 177, 131, .38);
+}
+.btn.btn-revive:hover { box-shadow: 0 12px 26px rgba(35, 177, 131, .46); }
+
+@media (prefers-reduced-motion: reduce) {
+  .stat-revive.pop { animation: none; }
+}
 
 .stat-value.bump { animation: bump .32s ease; }
 
