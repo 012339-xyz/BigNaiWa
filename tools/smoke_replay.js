@@ -12,7 +12,8 @@
  *    2. 起一个临时静态服务器（测完就关，不用提前准备任何东西）；
  *    3. 把榜单接口拦截下来回固定数据 —— 外网不通也照样测 UI；
  *    4. 把 rAF 换成「微任务快进」，几秒内走完一局真实游戏；
- *    5. 逐条点：结算页那颗、榜上每行的那颗、倍速 / 暂停 / 翻页 / 退出还原。
+ *    5. 逐条点：结算页那颗、榜上每行的那颗、倍速 / 暂停 / 翻页 / 退出还原；
+ *    6. 把复活币那一屏点一遍（越线 → 用一枚 → 清掉线上的水果 → 接着玩）。
  *
  *  覆盖的是单测测不到的那部分：DOM 真的显示了吗、遮罩真的收起来了吗、
  *  退出之后真的原样还回去了吗、控制台有没有报错。
@@ -438,7 +439,60 @@ async function main() {
   const shot3 = path.join(TMP, 'board-verified.png');
   await page.screenshot({ path: shot3 });
 
-  console.log('[8] 错误检查');
+  console.log('[8] 复活币：越线那一屏 + 用一枚');
+  await page.evaluate(() => window.DanaiwaBoard.close());
+  const ask = await page.evaluate(() => {
+    const D = window.__DNW__;
+    const above = () => D.sim.state.balls.filter((b) => !b.dead && b.y - b.r < 142).length;
+    const before = above();
+    D.addScore(2000);          // 走真路径发币：加分 → sim 发一枚 → 徽章弹出来
+    D.gameOver();              // 手上这局本来就 over，这里只走一遍「越线那一屏」
+    return {
+      before, score: D.state.score, revives: D.state.revives,
+      prompt: !document.getElementById('revivePrompt').hidden,
+      panelHidden: document.getElementById('overPanel').hidden,
+      scoreTxt: document.getElementById('reviveScore').textContent,
+      left: document.getElementById('reviveLeft').textContent,
+      badge: !document.getElementById('reviveBadge').hidden,
+      badgeTxt: document.getElementById('reviveCount').textContent
+    };
+  });
+  const shot4 = path.join(TMP, 'revive-prompt.png');
+  await page.screenshot({ path: shot4 });
+  check('有币时越线先弹「还能再救一下」，结算屏让位',
+    ask.prompt && ask.panelHidden, JSON.stringify(ask));
+  check('询问屏上写着本局分数和剩余枚数',
+    ask.scoreTxt === String(ask.score) && ask.left === '还剩 1 枚',
+    ask.scoreTxt + ' / ' + ask.left);
+  check('左上角复活币胶囊露出来了', ask.badge && ask.badgeTxt === '×1', ask.badgeTxt);
+  check('线以上确实卡着水果（不然没得清）', ask.before > 0, 'above=' + ask.before);
+
+  await page.click('#reviveBtn');
+  const used = await page.evaluate(() => {
+    const D = window.__DNW__;
+    const above = D.sim.state.balls.filter((b) => !b.dead && b.y - b.r < 142).length;
+    const drops = D.sim.state.inputs.length;
+    D.tryDrop();               // 救回来要能立刻接着玩
+    return {
+      prompt: document.getElementById('revivePrompt').hidden,
+      overlay: document.getElementById('overlay').classList.contains('show'),
+      over: D.state.over, revives: D.state.revives,
+      badge: document.getElementById('reviveBadge').hidden,
+      above, drops, after: D.sim.state.inputs.length
+    };
+  });
+  check('用一枚之后询问屏和遮罩都收起来',
+    used.prompt && !used.overlay, JSON.stringify(used));
+  check('解除判负、币扣掉、胶囊也收起来',
+    !used.over && used.revives === 0 && used.badge,
+    'over=' + used.over + ' revives=' + used.revives);
+  check('警戒线以上的水果被清干净了', used.above === 0, 'above=' + used.above);
+  check('救回来之后还能接着投', used.after === used.drops + 1,
+    used.drops + ' → ' + used.after);
+
+  await page.evaluate(() => window.__DNW__.reset());   // 收尾，给后面留个干净棋盘
+
+  console.log('[9] 错误检查');
   const realNoise = consoleNoise.filter((m) => !/favicon/i.test(m) && !/404/.test(m));
   const bad404 = notFound.filter((u) => !/favicon/i.test(u));
   check('没有掉图 / 缺文件', bad404.length === 0,
@@ -449,7 +503,7 @@ async function main() {
   await browser.close();
   server.close();
   clearTimeout(watchdog);
-  console.log('      截图：\n        ' + [shot1, shot2, shot3].join('\n        '));
+  console.log('      截图：\n        ' + [shot1, shot2, shot3, shot4].join('\n        '));
   console.log(pass ? '\n浏览器冒烟通过' : '\n浏览器冒烟未通过');
   process.exit(pass ? 0 : 1);
 }

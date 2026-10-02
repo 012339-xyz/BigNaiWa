@@ -11,6 +11,8 @@
  *       声称分数是假的也照样能播完 —— 没通过校验的存档照样能看
  *    6. 回放外壳（game.js 的播放模式）：进得去、出得来、
  *       播放中动不了你手上那一局、播到判负也不会重复触发 onGameOver
+ *    7. 用了复活币的局照样能验证：复活按 tick 记进回放，
+ *       抹掉 / 多插一次都过不了
  * ============================================================ */
 'use strict';
 const fs = require('fs'), path = require('path'), vm = require('vm');
@@ -149,7 +151,8 @@ const enc = Sim.encode(rep);
 console.log('      编码后 ' + enc.length + ' 字符');
 const dec = Sim.decode(enc);
 check('解出来和原来一样', JSON.stringify(dec) === JSON.stringify({
-  v: 2, seed: rep.seed, end: rep.end, score: rep.score, inputs: rep.inputs
+  v: 2, seed: rep.seed, end: rep.end, score: rep.score, inputs: rep.inputs,
+  revives: rep.revives || []
 }), '编码长度 ' + enc.length + ' 字符');
 
 /* ---- 3. 重跑一遍：分数必须完全一致 ---- */
@@ -381,6 +384,106 @@ console.log('[7] 回放外壳（播放模式）');
 
   check('坏回放开不了播',
     U.playReplay('', {}) === false && U.mode === 'game', 'mode=' + U.mode);
+}
+
+/* ============================================================
+ * [8] 用了复活币的局也必须能验证通过
+ *
+ *  复活是玩家的选择、会改掉棋盘（清掉线上的水果、解除判负），
+ *  所以它必须像投放一样按 tick 记进回放 —— 不记，重放到第一次判负
+ *  就停了，后面那些投放根本投不进去；多记，凭空多出来的清场就是作弊。
+ *
+ *  这里用固定种子 43 + 固定打法：这一路会**自然**打到 2042 分，
+ *  正好跨过 2000 发一枚复活币 —— 分数是合并出来的，回放才能复现。
+ * ============================================================ */
+console.log('[8] 用了复活币的局照样能验证');
+{
+  const s = Sim.create(43);
+
+  /* 傻瓜打法：有同级的就往它头上落（低处优先），否则找最平的地方，
+     再加一点抖动免得每次都落在同一个点上。纯函数，回放里也会这么走。 */
+  function botX(n) {
+    const pend = s.state.pending;
+    let hit = null, hitY = -Infinity;
+    for (const b of s.state.balls) {
+      if (b.dead) continue;
+      if (b.tier === pend && b.y > hitY) { hit = b; hitY = b.y; }
+    }
+    let x;
+    if (hit && hitY > 320) {
+      x = Math.max(60, Math.min(360, hit.x));   // 先夹回场内，再抖
+    } else {
+      x = 210;
+      let bh = Infinity;
+      for (let c = 60; c <= 360; c += 15) {
+        let h = 0;
+        for (const b of s.state.balls) {
+          if (b.dead) continue;
+          if (Math.abs(b.x - c) < b.r + 8) h = Math.max(h, b.y - b.r);
+        }
+        if (h < bh) { bh = h; x = c; }
+      }
+    }
+    return Math.max(60, Math.min(360, x + ((n * 0.6180339887) % 1 - 0.5) * 40));
+  }
+
+  function playToOver() {
+    let n = 0;
+    while (!s.state.over && n++ < 90000) {
+      if (s.state.ready) { s.moveAim(botX(n)); s.tryDrop(); }
+      s.update();
+    }
+    return s.state.over;
+  }
+
+  playToOver();
+  const scoreAtOver = s.state.score;
+  const overTick = s.state.tick;
+  check('打到判负', overTick > 0, 'tick=' + overTick + ' 分数 ' + scoreAtOver);
+  check('分数是合并出来的、自然跨过 2000 → 手上有一枚复活币',
+    scoreAtOver >= 2000 && s.state.revives === 1,
+    'score=' + scoreAtOver + ' revives=' + s.state.revives);
+
+  check('判负后能用掉那枚币', s.revive() === true && !s.state.over && s.state.revives === 0,
+    'over=' + s.state.over + ' revives=' + s.state.revives);
+  check('没币了再调一次就没了', s.revive() === false, '');
+
+  playToOver();
+  const rep2 = s.replay();
+  check('复活之后又接着打到判负', rep2.end > overTick && rep2.score > scoreAtOver,
+    'tick ' + overTick + ' → ' + rep2.end + '，分数 ' + scoreAtOver + ' → ' + rep2.score);
+  check('复活的 tick 记进了回放',
+    rep2.revives.length === 1 && rep2.revives[0] === overTick,
+    JSON.stringify(rep2.revives) + '（判负在 ' + overTick + '）');
+
+  const enc2 = Sim.encode(rep2);
+  const dec2 = Sim.decode(enc2);
+  check('编解码把复活时刻原样带回来',
+    JSON.stringify(dec2.revives) === JSON.stringify(rep2.revives) &&
+    dec2.inputs.length === rep2.inputs.length,
+    JSON.stringify(dec2.revives) + '，投放 ' + dec2.inputs.length + ' 次');
+
+  const v = Sim.verify(enc2);
+  check('带复活的回放能验证通过',
+    v.ok === true && v.score === rep2.score,
+    v.ok ? v.score + ' 分' : v.reason);
+
+  /* 反过来两条：少记、多记都必须被拒 */
+  const noRev = Sim.verify(Sim.encode({
+    v: 2, seed: rep2.seed, end: rep2.end, score: rep2.score, inputs: rep2.inputs
+  }));
+  check('抹掉复活记录就对不上（所以非记不可）', noRev.ok === false, noRev.reason);
+
+  const fakeRev = Sim.verify(Sim.encode({
+    v: 2, seed: rep2.seed, end: rep2.end, score: rep2.score, inputs: rep2.inputs,
+    revives: [rep2.revives[0], rep2.revives[0] + 1]
+  }));
+  check('凭空多插一次复活会被拒', fakeRev.ok === false, fakeRev.reason);
+
+  /* 老记录（第 5 段之后什么都没有）照旧解得开：这局就算没复活过 */
+  const old = Sim.decode(enc2.split(';').slice(0, 5).join(';'));
+  check('没有复活段的老记录照样能解', !!old && old.revives.length === 0,
+    'revives=' + JSON.stringify(old && old.revives));
 }
 
 console.log(pass ? '\n回放验证自检通过' : '\n回放验证自检未通过');

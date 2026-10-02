@@ -1,8 +1,8 @@
 /* ============================================================
- *  合成大西瓜 · 确定性模拟核心（sim.js）
+ *  合成大奶娃 · 确定性模拟核心（sim.js）
  *
- *  这里只放「决定一局怎么走」的东西：物理、合成、计分、判负、投放节奏、
- *  出水果的随机数。没有任何 DOM / Canvas / 音效 / 粒子 —— 所以它能同时跑在
+ *  这里只放「决定一局怎么走」的东西：物理、合成、计分、判负、复活、
+ *  投放节奏、出水果的随机数。没有任何 DOM / Canvas / 音效 / 粒子 —— 所以它能同时跑在
  *  浏览器主线程、Web Worker 和 node 里。
  *
  *  为什么要拆出来：排行榜改成「回放即证明」。
@@ -40,9 +40,14 @@
   const REST_SPEED = 140;
   const REST_SPEED2 = REST_SPEED * REST_SPEED;
 
-  const MAX_TIER  = 10;
-  const MAX_BONUS = 100;
-  const MERGE_PAD = 0.8;
+  const MAX_TIER  = 10;      // 最大那只（神奶蛙）的索引
+  const MAX_BONUS = 500;     // 两只神奶蛙相撞的奖励分
+                             // （原来是 100 —— 合出全游戏最难的东西只给 100 分，太寒酸；
+                             //  而且它同时清掉两块最大的水果、相当于救一条命，值这个价）
+  const MAX_MERGE_GIVES_REVIVE = true;  // 两只神奶蛙一起炸掉时，额外送一枚复活币
+  const FREEZE_MS = 130;     // 清场时的定格，让这一下有重量
+  const REVIVE_STEP = 2000;  // 每累计多少分，发一枚复活币
+  const MERGE_PAD = 0.8;     // 合成判定的接触容差（px）
 
   const RESTITUTION      = 0.38;
   const WALL_RESTITUTION = 0.45;
@@ -57,27 +62,27 @@
 
   const FRUITS = [
     { name: '葡萄',   r: 17,  c1: '#c084f5', c2: '#7a3fb0', line: 'rgba(74,26,120,.35)',
-      file: 'assets/fruits/01-grape.png',     pc1: '#e9c466', pc2: '#b8903a' },
+      file: 'assets/fruits/01-grape.webp',     pc1: '#e9c466', pc2: '#b8903a' },
     { name: '樱桃',   r: 23,  c1: '#ff8a99', c2: '#c62346', line: 'rgba(120,10,40,.35)',
-      file: 'assets/fruits/02-cherry.png',    pc1: '#ffe684', pc2: '#d8b44f' },
+      file: 'assets/fruits/02-cherry.webp',    pc1: '#ffe684', pc2: '#d8b44f' },
     { name: '橘子',   r: 31,  c1: '#ffc06a', c2: '#e0741a', line: 'rgba(140,62,0,.32)',
-      file: 'assets/fruits/03-orange.png',    pc1: '#fdd865', pc2: '#cfa63f' },
+      file: 'assets/fruits/03-orange.webp',    pc1: '#fdd865', pc2: '#cfa63f' },
     { name: '柠檬',   r: 39,  c1: '#fff285', c2: '#e0b000', line: 'rgba(140,110,0,.32)',
-      file: 'assets/fruits/04-lemon.png',     pc1: '#f6cd63', pc2: '#c9a040' },
+      file: 'assets/fruits/04-lemon.webp',     pc1: '#f6cd63', pc2: '#c9a040' },
     { name: '猕猴桃', r: 48,  c1: '#b9e05a', c2: '#5d8c1c', line: 'rgba(60,90,10,.32)',
-      file: 'assets/fruits/05-kiwi.png',      pc1: '#c4a559', pc2: '#94793c' },
+      file: 'assets/fruits/05-kiwi.webp',      pc1: '#c4a559', pc2: '#94793c' },
     { name: '番茄',   r: 58,  c1: '#ff8a66', c2: '#c62f28', line: 'rgba(120,20,10,.32)',
-      file: 'assets/fruits/06-tomato.png',    pc1: '#fbd75a', pc2: '#cba63c' },
+      file: 'assets/fruits/06-tomato.webp',    pc1: '#fbd75a', pc2: '#cba63c' },
     { name: '桃子',   r: 69,  c1: '#ffd0d0', c2: '#ea7f93', line: 'rgba(160,60,80,.3)',
-      file: 'assets/fruits/07-peach.png',     pc1: '#f7c45a', pc2: '#c99a3e' },
+      file: 'assets/fruits/07-peach.webp',     pc1: '#f7c45a', pc2: '#c99a3e' },
     { name: '菠萝',   r: 81,  c1: '#ffe07a', c2: '#c88a12', line: 'rgba(130,80,0,.32)',
-      file: 'assets/fruits/08-pineapple.png', pc1: '#ffd37b', pc2: '#d1a252' },
+      file: 'assets/fruits/08-pineapple.webp', pc1: '#ffd37b', pc2: '#d1a252' },
     { name: '椰子',   r: 94,  c1: '#f0e2c6', c2: '#9b7b4f', line: 'rgba(90,64,32,.35)',
-      file: 'assets/fruits/09-coconut.png',   pc1: '#ffd771', pc2: '#d3a94e' },
-    { name: '半西瓜', r: 108, c1: '#ff9d78', c2: '#c23a2c', line: 'rgba(120,24,16,.32)',
-      file: 'assets/fruits/10-halfmelon.png', pc1: '#ccab68', pc2: '#9c8047' },
-    { name: '大西瓜', r: 124, c1: '#7ce878', c2: '#1c8a33', line: 'rgba(12,70,24,.4)',
-      file: 'assets/fruits/11-watermelon.png', pc1: '#eece9b', pc2: '#c0a271' }
+      file: 'assets/fruits/09-coconut.webp',   pc1: '#ffd771', pc2: '#d3a94e' },
+    { name: '半奶蛙', r: 108, c1: '#ff9d78', c2: '#c23a2c', line: 'rgba(120,24,16,.32)',
+      file: 'assets/fruits/10-halfmelon.webp', pc1: '#ccab68', pc2: '#9c8047' },
+    { name: '神奶蛙', r: 124, c1: '#7ce878', c2: '#1c8a33', line: 'rgba(12,70,24,.4)',
+      file: 'assets/fruits/11-watermelon.webp', pc1: '#eece9b', pc2: '#c0a271' }
   ];
 
   const MERGE_SCORE = [0, 1, 3, 6, 10, 15, 21, 28, 36, 45, 55];
@@ -157,7 +162,14 @@
       aimX: W / 2,
       over: false,
       danger: false,
-      inputs: []        // [{t: tick, x: 落点}] —— 这就是「回放」的本体
+      inputs: [],       // [{t: tick, x: 落点}] —— 这就是「回放」的本体
+      revives: 0,       // 本局还剩几枚复活币（重开清零）
+      reviveGiven: 0,   // 本局已经发放过几次（用来判断跨过新的 2000 分）
+      freeze: 0,        // 清场命中定格剩余秒数
+      /* 复活的时刻（tick）。复活是**玩家的选择**，会改变棋盘和之后的分数，
+         所以它必须像投放一样记进回放 —— 少了这份记录，重跑到第一次判负
+         就停住了，后面那些投放根本投不进去，分数自然对不上。 */
+      reviveLog: []
     };
 
     const events = [];  // 游戏层消费：合成、加分、判负（做音效/粒子/飘分用）
@@ -212,9 +224,24 @@
       return ball;
     }
 
+    /* 加分。复活币是跟着分数走的（每满 REVIVE_STEP 发一枚），
+       所以发放必须发生在加完分的同一处 —— 换个地方调就会漏发/多发。 */
     function addScore(n) {
       state.score += n;
+      grantRevives();
       return state.score;
+    }
+
+    /* 每累计 REVIVE_STEP 分，发一枚复活币。
+       只改模拟状态，飘分/音效由游戏层听事件去做。 */
+    function grantRevives() {
+      let got = 0;
+      while (state.reviveGiven < Math.floor(state.score / REVIVE_STEP)) {
+        state.reviveGiven++;
+        state.revives++;
+        got++;
+      }
+      if (got) events.push({ type: 'reviveGrant', n: got, score: state.score });
     }
 
     function processMerges(merges) {
@@ -226,8 +253,15 @@
         const tier = a.tier;
 
         if (tier >= MAX_TIER) {
+          /* 两只神奶蛙 → 一起炸掉，拿一大笔奖励分（外加一枚复活币）。
+             注意：它同时清掉了两块最大的水果，是后期唯一的泄压阀，不能取消。
+             定格也算模拟的一部分 —— tick 会跟着停，回放里停的帧数一模一样。 */
           addScore(MAX_BONUS);
-          events.push({ type: 'bonus', x: mx, y: my, tier: MAX_TIER, score: MAX_BONUS, ball: null });
+          state.freeze = FREEZE_MS / 1000;
+          let revive = false;
+          if (MAX_MERGE_GIVES_REVIVE) { state.revives++; revive = true; }
+          events.push({ type: 'bonus', x: mx, y: my, tier: MAX_TIER, score: MAX_BONUS,
+                        ball: null, revive: revive });
         } else {
           const nt = tier + 1;
           const nb = makeBall(mx, my, nt, (a.vx + b.vx) * 0.5, (a.vy + b.vy) * 0.5 - 60);
@@ -537,10 +571,56 @@
       events.push({ type: 'over', score: state.score });
     }
 
+    /* 复活：清掉警戒线以上的水果、解除判负，接着玩。
+       规则全在这一层（游戏层只管把界面收起来），
+       这样「清了哪几颗」才和回放里跑出来的完全一致。
+         record=true  → 正常游玩，把这个 tick 记进回放
+         record=false  → 回放注入，不许往记录里再写一遍 */
+    function doRevive(record) {
+      if (!state.over || state.revives <= 0) return false;
+
+      /* 1) 找最顶上的：按「上边缘」比，最小的最靠上 */
+      let top = -1;
+      let topEdge = Infinity;
+      for (let i = 0; i < state.balls.length; i++) {
+        const b = state.balls[i];
+        if (b.dead) continue;
+        const edge = b.y - b.r;
+        if (edge < topEdge) { topEdge = edge; top = i; }
+      }
+      if (top >= 0) state.balls.splice(top, 1);
+
+      /* 2) 还压在警戒线以上的，一并清掉（只清一颗的话会立刻再输） */
+      state.balls = state.balls.filter((b) => !b.dead && (b.y - b.r) >= DANGER_Y + 6);
+
+      /* 3) 越线计时清零，给玩家一个反应窗口 */
+      for (let i = 0; i < state.balls.length; i++) state.balls[i].overTime = 0;
+
+      state.revives--;
+      state.over = false;
+      state.danger = false;
+      state.ready = true;
+      state.cooldown = 0;
+      if (record) state.reviveLog.push(state.tick);
+      events.push({ type: 'revive', x: state.aimX, y: 0 });
+      return true;
+    }
+
+    function revive() { return doRevive(true); }
+    function injectRevive() { return doRevive(false); }
+
     /* 跑一帧固定步长。返回本帧产生的事件（也可以之后用 drainEvents() 取）。 */
     function update(dt) {
-      if (state.over) return [];
       if (dt === undefined) dt = FIXED;
+
+      /* 清场命中定格：世界停一下（tick、冷却、判负计时全部跟着停），
+         画面照常重绘 —— 所以定格必须在模拟这一层，回放里才会停得一模一样。 */
+      if (state.freeze > 0) {
+        state.freeze = Math.max(0, state.freeze - dt);
+        return [];
+      }
+
+      if (state.over) return [];
 
       if (!state.ready) {
         state.cooldown -= dt;
@@ -576,6 +656,10 @@
       state.danger = false;
       state.aimX = W / 2;
       state.inputs.length = 0;
+      state.revives = 0;         // 复活币只在本局有效，重开清零
+      state.reviveGiven = 0;
+      state.freeze = 0;
+      state.reviveLog.length = 0;
       state.pending = pickSpawnTier();
       state.next = pickSpawnTier(state.pending);
       events.length = 0;
@@ -587,13 +671,15 @@
       state, events, get shapes() { return shapes; },
       get seed() { return currentSeed; },
       update, reset, tryDrop, injectDrop, moveAim, aimLimit, makeBall, stepPhysics,
+      addScore, revive, injectRevive,
       shapeOf: shapeOfT,
       drainEvents() { const e = events.slice(); events.length = 0; return e; },
-      /* 当前这一局的回放（记录 tick 数和分数） */
+      /* 当前这一局的回放（记录 tick 数、分数和复活的时刻） */
       replay() {
         return {
           v: 2, seed: currentSeed, end: state.tick,
-          score: state.score, inputs: state.inputs.slice()
+          score: state.score, inputs: state.inputs.slice(),
+          revives: state.reviveLog.slice()
         };
       }
     };
@@ -605,9 +691,13 @@
    *  文本格式（好调试、好复制粘贴、TinyWebDB 直接存）：
    *    v2;<seed base36>;<end tick base36>;<score>;
    *    <dt base36>:<x*64 base36>,...
+   *    [;<dt base36>,...]           ← 复活的时刻（没有复活就不写这一段）
    *  dt 是和上一次投放的 tick 差（第一次是绝对 tick），
    *  落点存的是 x*64 的整数，正好回代成 1/64 px。
    *  分隔符必须避开 base36 的字符表（0-9a-z），所以用 ':' 而不是 'x'。
+   *
+   *  复活那段是可选的：老记录没有它，解出来就是「这局没复活过」，
+   *  校验结果和以前一模一样 —— 存量榜单记录不受影响。
    * ------------------------------------------------------- */
   function encode(replay) {
     if (!replay || !replay.inputs) return '';
@@ -619,8 +709,21 @@
       prev = it.t;
       parts.push(dt.toString(36) + ':' + Math.round(it.x * DROP_QUANT).toString(36));
     }
-    return 'v2;' + (replay.seed >>> 0).toString(36) + ';' +
+    let out = 'v2;' + (replay.seed >>> 0).toString(36) + ';' +
       (replay.end | 0).toString(36) + ';' + (replay.score | 0) + ';' + parts.join(',');
+
+    const revs = replay.revives;
+    if (revs && revs.length) {
+      const rs = [];
+      let rp = 0;
+      for (let i = 0; i < revs.length; i++) {
+        const t = revs[i] | 0;
+        rs.push((t - rp).toString(36));
+        rp = t;
+      }
+      out += ';' + rs.join(',');
+    }
+    return out;
   }
 
   function decode(str) {
@@ -634,7 +737,8 @@
 
     const inputs = [];
     let tick = 0;
-    const body = seg.slice(4).join(';');
+    /* 老记录的投放体只占第 5 段（里面没有 ';'），第 6 段起才是复活 */
+    const body = seg[4];
     if (body) {
       const items = body.split(',');
       if (items.length > MAX_DROPS) return null;
@@ -648,8 +752,22 @@
         inputs.push({ t: tick, x: xq / DROP_QUANT });
       }
     }
+
+    const revives = [];
+    if (seg.length > 5 && seg[5]) {
+      const items = seg[5].split(',');
+      if (items.length > MAX_DROPS) return null;
+      let rt = 0;
+      for (let i = 0; i < items.length; i++) {
+        const dt = parseInt(items[i], 36);
+        if (!isFinite(dt) || dt < 0) return null;
+        rt += dt;
+        revives.push(rt);
+      }
+    }
+
     if (end > MAX_TICKS || end <= 0) return null;
-    return { v: 2, seed: seed >>> 0, end: end, score: score, inputs: inputs };
+    return { v: 2, seed: seed >>> 0, end: end, score: score, inputs: inputs, revives: revives };
   }
 
   /* ---------------------------------------------------------
@@ -666,7 +784,8 @@
    *    step()                // 推进 1 tick；返回 false = 播完或出错
    *  }
    *
-   *  播放不会写 inputs（injectDrop 本来就不写），所以同一份存档
+   *  播放不会写 inputs（injectDrop 本来就不写），复活也一样
+   *  （injectRevive 不写 reviveLog），所以同一份存档
    *  播多少遍都不会被污染 —— 这一点由 replay.test 断言。
    * ------------------------------------------------------- */
   function normalizeReplay(record) {
@@ -680,6 +799,19 @@
       return { error: '时长不合法' };
     if (!rep.inputs || rep.inputs.length > MAX_DROPS)
       return { error: '投放次数不合法' };
+    /* 复活记录（可选）：必须是不递减的 tick 列表 */
+    if (rep.revives !== undefined && rep.revives !== null) {
+      if (!Array.isArray(rep.revives) || rep.revives.length > MAX_DROPS)
+        return { error: '复活记录不合法' };
+      for (let i = 0; i < rep.revives.length; i++) {
+        const t = rep.revives[i];
+        if (typeof t !== 'number' || !isFinite(t) || t < 0 || Math.floor(t) !== t ||
+            (i > 0 && t < rep.revives[i - 1]))
+          return { error: '复活记录不合法' };
+      }
+    } else {
+      rep.revives = [];
+    }
     return { rep: rep };
   }
 
@@ -688,13 +820,19 @@
     const rep = norm.rep;
     const sim = rep ? create(rep.seed, parts) : null;
     const inputs = rep ? rep.inputs : [];
+    const revs = rep ? (rep.revives || []) : [];
     const n = inputs.length;
-    let i = 0;
+    let i = 0, ri = 0;
     let err = norm.error || '';
+
+    /* 这一 tick 有复活记录吗 —— 判负只是暂时的，还能被救回来 */
+    function reviveDue(t) { return ri < revs.length && revs[ri] === t; }
 
     function finished() {
       if (err || !sim) return true;
-      /* 已经判负就停（剩下的投放本就不该存在，verify 会用 consumed 拦下） */
+      if (reviveDue(sim.state.tick)) return false;
+      /* 已经判负又没有复活可打就停（剩下的投放本就不该存在，
+         verify 会用 consumed 拦下） */
       if (sim.state.over) return true;
       return sim.state.tick >= rep.end;
     }
@@ -702,6 +840,20 @@
     function step() {
       if (finished()) return false;
       const t = sim.state.tick;
+
+      /* 0) 这个 tick 到期的复活：先救回来再谈投放 ——
+            游戏里也是这个顺序（判负 → 点「用一枚复活币」→ 同一 tick 上还能投一颗） */
+      while (ri < revs.length && revs[ri] === t) {
+        if (!sim.injectRevive()) {
+          err = '复活时机不合法（没判负或没有复活币）';
+          return false;
+        }
+        ri++;
+      }
+      if (ri < revs.length && revs[ri] < t) {
+        err = '复活记录的 tick 顺序不对';
+        return false;
+      }
 
       /* 1) 这个 tick 到期的投放 */
       while (i < n && inputs[i].t === t) {
@@ -772,6 +924,7 @@
     /* 常量，游戏层和验证层共用一份，避免两边改了不同步 */
     W, H, WALL, DROP_Y, DANGER_Y, GRAVITY, SUBSTEPS, ITER, DROP_MS,
     OVER_LIMIT, MAX_TIER, MAX_BONUS, MERGE_PAD, FIXED, DROP_QUANT,
+    MAX_MERGE_GIVES_REVIVE, FREEZE_MS, REVIVE_STEP,
     MAX_TICKS, MAX_DROPS,
     FRUITS, MERGE_SCORE, SPAWN_TIERS, SPAWN_WEIGHTS, ASSET_FILL,
     makeRng, create, shapeOf, encode, decode, makePlayer, verify, clamp

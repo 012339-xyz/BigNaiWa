@@ -1,5 +1,5 @@
 /* ============================================================
- *  合成大西瓜 · Suika Game
+ *  合成大奶娃 · Suika Game
  *  纯原生 HTML + CSS + JavaScript，无任何依赖。
  *
  *  物理：PBD（位置约束求解）—— 3 个子步 × 6 次迭代，
@@ -27,9 +27,13 @@
   const WALL = S.WALL;            // 左右墙厚
   const DROP_Y = S.DROP_Y;        // 待投放水果的高度
   const DANGER_Y = S.DANGER_Y;    // 警戒线
-  const MAX_TIER = S.MAX_TIER;    // 大西瓜的索引
+  const MAX_TIER = S.MAX_TIER;    // 最大那只（神奶蛙）的索引
   const ASSET_FILL = S.ASSET_FILL;// 贴图里主体占画布长边的比例，与生成脚本保持一致
   const FRUITS = S.FRUITS;
+  /* 玩法数值也从 sim 拿：加分、发复活币、清场定格全发生在那一边，
+     两边各写一份的话改了一边忘另一边，回放就对不上了。 */
+  const MAX_BONUS = S.MAX_BONUS;     // 两只神奶蛙相撞的奖励分（自检要读）
+  const REVIVE_STEP = S.REVIVE_STEP; // 每累计多少分发一枚复活币
 
   /* 每局一个随机种子。它会跟着回放一起上传，
      验证的人用同一个种子就能重放出完全一样的出球顺序。 */
@@ -46,7 +50,6 @@
   const canvas    = document.getElementById('game');
   const ctx       = canvas.getContext('2d');
   const stage     = document.getElementById('stage');
-  const overlay   = document.getElementById('overlay');
   const scoreEl   = document.getElementById('score');
   const bestEl    = document.getElementById('best');
   const finalScoreEl = document.getElementById('finalScore');
@@ -58,6 +61,15 @@
   const soundBtn   = document.getElementById('soundBtn');
   const resetBtn   = document.getElementById('resetBtn');
   const restartBtn = document.getElementById('restartBtn');
+  const overlayEl     = document.getElementById('overlay');
+  const revivePromptEl = document.getElementById('revivePrompt');
+  const overPanelEl    = document.getElementById('overPanel');
+  const reviveScoreEl  = document.getElementById('reviveScore');
+  const reviveLeftEl   = document.getElementById('reviveLeft');
+  const reviveBtn      = document.getElementById('reviveBtn');
+  const giveUpBtn      = document.getElementById('giveUpBtn');
+  const reviveBadge    = document.getElementById('reviveBadge');
+  const reviveCountEl  = document.getElementById('reviveCount');
 
   /* ---------------------------------------------------------
    *  工具
@@ -201,26 +213,61 @@
     if (state.particles.length > 420) state.particles.splice(0, state.particles.length - 420);
   }
 
+  /* 复活币胶囊：有币才显示，跨过 2000 分时弹一下。
+     注意 0 枚时也要把文字刷成 ×0 —— 否则下次显示出来的是上一次的旧数字。
+     回放时不显示：那是录像里那个人的币，不是你的。 */
+  function paintRevives(pop) {
+    if (!reviveBadge) return;
+    if (reviveCountEl) reviveCountEl.textContent = '×' + state.revives;
+    if (state.revives > 0 && mode === 'game') {
+      reviveBadge.hidden = false;
+      if (pop) {
+        reviveBadge.classList.remove('pop');
+        void reviveBadge.offsetWidth;
+        reviveBadge.classList.add('pop');
+      }
+    } else {
+      reviveBadge.hidden = true;
+      reviveBadge.classList.remove('pop');
+    }
+  }
+
+  /* 「+1 复活币」那一行大字飘分 + 音效。
+     模拟那边只负责 state.revives++，观感全在这一层。 */
+  function paintReviveGrant() {
+    paintRevives(true);
+    state.floats.push({ x: W / 2, y: 210, text: '+1 复活币', life: 1.4, big: true });
+    Sound.merge(6);
+  }
+
   /* 分数本身是 sim 加的（processMerges 里就已经 +n 了），
-     这边只负责把结果同步到界面上 —— 再加一次就会翻倍，
+     这一边只负责把结果同步到界面上 —— 再加一次就会翻倍，
      而且那样 game.js 也就成了「改分数的地方」，回放就复现不了了。 */
-  function addScore(n, x, y, text) {
+  function paintScore(n, x, y, text) {
     /* 看回放时只飘字：不碰最高分、不改面板数字 ——
        看一局录像没道理把你自己的最高分抬上去，退出来还得改回去。 */
-    if (mode === 'play') {
-      if (x !== undefined) state.floats.push({ x, y, text: text || ('+' + n), life: 1 });
-      return;
+    if (mode !== 'play') {
+      if (state.score > state.best) {
+        state.best = state.score;
+        localStorage.setItem(BEST_KEY, String(state.best));
+        bestEl.textContent = state.best;
+      }
+      scoreEl.textContent = state.score;
+      bump(scoreEl);
     }
-    if (state.score > state.best) {
-      state.best = state.score;
-      localStorage.setItem(BEST_KEY, String(state.best));
-      bestEl.textContent = state.best;
-    }
-    scoreEl.textContent = state.score;
-    bump(scoreEl);
     if (x !== undefined) {
       state.floats.push({ x, y, text: text || ('+' + n), life: 1 });
     }
+  }
+
+  /* 加 n 分：分数交给 sim（加分和发复活币都在那一边，回放要复现），
+     再把界面刷出来。正常流程是 sim 自己发事件、pumpEvents 走 paintScore ——
+     只有控制台和玩法自检会直接调这个，别在游戏流程里调，会加两次。 */
+  function addScore(n, x, y, text) {
+    sim.addScore(n);
+    pumpEvents();          // 把刚才那次发币的事件当场吃掉（徽章 / 飘字 / 音效）
+    paintScore(n, x, y, text);
+    return state.score;
   }
 
   function bump(el) {
@@ -244,20 +291,9 @@
 
   /* ---------------------------------------------------------
    *  事件分发
-   *  sim 只把「发生了什么」写进队列（合成/奖励/判负），
+   *  sim 只把「发生了什么」写进队列（合成 / 奖励 / 发币 / 复活 / 判负），
    *  音效、粒子、飘分、结算弹窗这些只跟画面有关的东西留在这一层。
    * ------------------------------------------------------- */
-  function onGameOver() {
-    finalScoreEl.textContent = state.score;
-    finalBestEl.textContent = state.best;
-    overlay.classList.add('show');
-    Sound.over();
-    /* 交给排行榜模块（没加载也不影响）：除了分数，把整局回放一起交出去 */
-    if (window.DanaiwaBoard && window.DanaiwaBoard.onGameOver) {
-      window.DanaiwaBoard.onGameOver(state.score, sim.replay());
-    }
-  }
-
   function pumpEvents() {
     const evs = sim.drainEvents();
     for (let i = 0; i < evs.length; i++) {
@@ -267,23 +303,78 @@
         drawNext();
       } else if (ev.type === 'merge') {
         if (ev.ball) ev.ball.popAt = performance.now();   // 弹出动画用真实时间
-        addScore(ev.score, ev.x, ev.y, '+' + ev.score);
+        paintScore(ev.score, ev.x, ev.y, '+' + ev.score);
         burst(ev.x, ev.y, ev.tier, 8 + ev.tier * 2, 140 + ev.tier * 22);
         Sound.merge(ev.tier);
         haptic(6 + ev.tier);
         if (ev.tier === MAX_TIER) state.flash = 1;
       } else if (ev.type === 'bonus') {
-        addScore(ev.score, ev.x, ev.y, '+' + ev.score);
-        burst(ev.x, ev.y, ev.tier, 34, 380);
+        /* 两只神奶蛙一起炸掉：大字飘分 + 更猛的爆裂 + 更亮的闪。
+           这里刻意**不给 addScore 传坐标** —— 普通飘字不要，
+           下面单独给「大字 +500」和一行说明。 */
+        paintScore(ev.score);
+        burst(ev.x, ev.y, ev.tier, 90, 560);
+        burst(ev.x, ev.y, Math.max(0, ev.tier - 2), 42, 340);
         Sound.bonus();
-        haptic(40);
-        state.flash = 1;
+        haptic(70);
+        state.flash = 1.4;                    // 比普通合成更亮的全屏闪
+        state.floats.push({ x: ev.x, y: ev.y - 74, text: '两个神奶蛙 💥', life: 1.6 });
+        state.floats.push({ x: ev.x, y: ev.y - 16, text: '+' + ev.score, life: 2.2, big: true });
+        if (ev.revive) paintRevives(true);    // 顺手送的那一枚
+      } else if (ev.type === 'reviveGrant') {
+        if (mode === 'game') paintReviveGrant();
+      } else if (ev.type === 'revive') {
+        /* 回放里没人点按钮，闪一下让观众知道这儿救回来了 */
+        if (mode === 'play') state.flash = 0.6;
       } else if (ev.type === 'over') {
         /* 回放里判负只意味着「播完了」：绝不能弹结算框，
            更不能走 DanaiwaBoard.onGameOver —— 那会把这份回放再提交一次。 */
-        if (mode === 'game') onGameOver();
+        if (mode === 'game') gameOver();
       }
     }
+  }
+
+  /* 正式结算：弹结算窗 + 把成绩（连整局回放）交给排行榜 */
+  function settle() {
+    if (revivePromptEl) revivePromptEl.hidden = true;
+    if (overPanelEl) overPanelEl.hidden = false;
+    if (overlayEl) overlayEl.classList.add('show');
+    /* 交给排行榜模块（没加载也不影响）：除了分数，把整局回放一起交出去 ——
+       验证的人拿它原样重跑一遍，分数对得上才算数。 */
+    if (window.DanaiwaBoard && window.DanaiwaBoard.onGameOver) {
+      window.DanaiwaBoard.onGameOver(state.score, sim.replay());
+    }
+  }
+
+  /* 越线那一屏：有复活币就先问一句 */
+  function askRevive() {
+    if (reviveScoreEl) reviveScoreEl.textContent = state.score;
+    if (reviveLeftEl) reviveLeftEl.textContent = '还剩 ' + state.revives + ' 枚';
+    if (revivePromptEl) revivePromptEl.hidden = false;
+    if (overPanelEl) overPanelEl.hidden = true;
+    if (overlayEl) overlayEl.classList.add('show');
+  }
+
+  function gameOver() {
+    state.over = true;
+    finalScoreEl.textContent = state.score;
+    finalBestEl.textContent = state.best;
+    Sound.over();
+    if (state.revives > 0) { askRevive(); return; }
+    settle();
+  }
+
+  /* 复活。规则全在 sim 里 —— 清哪几颗、扣几次、解除判负、把这个 tick
+     记进回放，全都必须和重放时跑出来的完全一致；这一层只管把界面收起来。
+     返回 false 表示当前不能复活（没次数 / 没判负）。 */
+  function revive() {
+    if (!sim.revive()) return false;
+    state.flash = 0.6;               // 闪一下，让玩家知道救回来了
+    if (revivePromptEl) revivePromptEl.hidden = true;
+    if (overlayEl) overlayEl.classList.remove('show');
+    paintRevives(false);
+    Sound.ensure();
+    return true;
   }
 
   function reset() {
@@ -292,7 +383,10 @@
     state.floats.length = 0;
     state.flash = 0;
     sim.reset(newSeed());            // 每局换新种子，回放就是靠它把整局拉回同一个起点
-    overlay.classList.remove('show');
+    overlayEl.classList.remove('show');
+    if (revivePromptEl) revivePromptEl.hidden = true;
+    if (overPanelEl) overPanelEl.hidden = false;
+    paintRevives(false);
     scoreEl.textContent = '0';
     bestEl.textContent = state.best;
     drawNext();
@@ -326,7 +420,21 @@
       return;
     }
 
-    /* —— 兜底：贴图没加载出来时，画程序化的圆形水果 —— */
+    /* —— 兜底一：贴图还没到位时，先画一张极模糊的同形状缩略图 ——
+       观感是「图正在慢慢变清晰」，而不是「图挂了」看到一堆卡通脸。
+       这张缩略图是内联的 data URL（assets/fruits/blur.js，约 8KB），不走网络。 */
+    if (blurImg && blurCfg && blurCfg.cols > 0) {
+      const idx = tier < blurCfg.cols ? tier : blurCfg.cols - 1;
+      const box = (r * 2) / ASSET_FILL;
+      const cell = blurCfg.cell;
+      c.imageSmoothingEnabled = true;
+      if ('imageSmoothingQuality' in c) c.imageSmoothingQuality = 'high';
+      c.drawImage(blurImg, idx * cell, 0, cell, cell, -box / 2, -box / 2, box, box);
+      c.restore();
+      return;
+    }
+
+    /* —— 兜底二：连缩略图都没有（blur.js 被拦了）才画程序化的圆形水果 —— */
     /* 主体 */
     const g = c.createRadialGradient(-r * 0.34, -r * 0.40, r * 0.12, 0, 0, r * 1.12);
     g.addColorStop(0, f.c1);
@@ -336,7 +444,7 @@
     c.fillStyle = g;
     c.fill();
 
-    /* 半西瓜 / 大西瓜 的纹理 */
+    /* 半奶蛙 / 神奶蛙 的纹理 */
     if (tier === MAX_TIER) {
       c.save();
       c.beginPath();
@@ -539,17 +647,20 @@
 
     /* 飘分 */
     ctx.textAlign = 'center';
-    ctx.font = '700 20px "PingFang SC", "Microsoft YaHei", system-ui, sans-serif';
     for (let i = state.floats.length - 1; i >= 0; i--) {
       const f = state.floats[i];
-      f.y -= 46 * dt;
-      f.life -= dt * 1.05;
+      const big = !!f.big;
+      f.y -= (big ? 24 : 46) * dt;
+      f.life -= dt * (big ? 0.55 : 1.05);
       if (f.life <= 0) { state.floats.splice(i, 1); continue; }
       ctx.globalAlpha = Math.min(1, f.life * 1.4);
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = 'rgba(255,255,255,.9)';
+      ctx.font = big
+        ? '900 40px "PingFang SC", "Microsoft YaHei", system-ui, sans-serif'
+        : '700 20px "PingFang SC", "Microsoft YaHei", system-ui, sans-serif';
+      ctx.lineWidth = big ? 9 : 4;
+      ctx.strokeStyle = 'rgba(255,255,255,.95)';
       ctx.strokeText(f.text, f.x, f.y);
-      ctx.fillStyle = '#f4623a';
+      ctx.fillStyle = big ? '#e8342f' : '#f4623a';
       ctx.fillText(f.text, f.x, f.y);
     }
     ctx.globalAlpha = 1;
@@ -660,7 +771,8 @@
     drawBoard();
     drawBalls();
     drawAim();
-    drawEffects(dt);
+    /* 定格期间把特效的 dt 也压成 0，让它跟世界一起停住 */
+    drawEffects(state.freeze > 0 ? 0 : dt);
 
     if (state.flash > 0) {
       ctx.save();
@@ -734,9 +846,11 @@
     if (!p || p.error || !p.state) return false;
 
     if (mode !== 'play') {
-      wasOverlay = overlay.classList.contains('show');
+      wasOverlay = overlayEl.classList.contains('show');
       wasModal = !!(boardModalEl && boardModalEl.classList.contains('show'));
-      overlay.classList.remove('show');
+      overlayEl.classList.remove('show');
+      /* 复活币胶囊是「你这一局」的，看录像时先收起来，退出来再刷 */
+      if (reviveBadge) reviveBadge.hidden = true;
       if (wasModal && window.DanaiwaBoard && window.DanaiwaBoard.close) window.DanaiwaBoard.close();
       mode = 'play';
       showHud(true);
@@ -765,7 +879,8 @@
     scoreEl.textContent = state.score;
     bestEl.textContent = state.best;
     drawNext();
-    if (wasOverlay) overlay.classList.add('show');
+    paintRevives(false);               // 复活币胶囊也切回你这一局
+    if (wasOverlay) overlayEl.classList.add('show');
     if (wasModal && window.DanaiwaBoard && window.DanaiwaBoard.open) window.DanaiwaBoard.open();
     wasOverlay = false;
     wasModal = false;
@@ -955,29 +1070,56 @@
    *  素材加载
    * ------------------------------------------------------- */
 
-  /* 贴图没加载出来就自动回退到程序化水果，所以缺图也能玩。
-     注意必须等 decode() 完成再拿去 drawImage —— 否则浏览器会画出“还没解码完”的半成品。 */
+  /* 贴图加载。三点很重要：
+       1) 弱网下「一次没拉到」很常见，**不重试**的话玩家会一直看到兜底的程序化水果
+          （一堆卡通脸），观感就是"图挂了"，所以失败要退避重试；
+       2) 必须等 decode() 完成再拿去 drawImage，否则浏览器会画出还没解码完的半成品；
+       3) 全部失败也不影响玩，只是回退成程序化水果。 */
+  const SPRITE_RETRY = 3;      // 每个素材最多试几次
+
+  let blurImg = null;          // 极模糊占位图（内联 data URL，秒到）
+  const blurCfg = window.FRUIT_BLUR || null;
+
+  function loadBlur() {
+    if (!blurCfg || !blurCfg.src) return;
+    const im = new Image();
+    im.onload = () => { blurImg = im; };
+    im.src = blurCfg.src;
+  }
+
   function loadSprites() {
     let left = 0;
-    for (let i = 0; i < FRUITS.length; i++) {
-      const f = FRUITS[i];
-      if (!f.file) continue;
-      left++;
+
+    function fetchOne(f, attempt) {
       const img = new Image();
       img.onload = () => {
         const ready = () => {
           f.img = img;
-          left--;
-          if (left === 0) refreshPreviews();
+          if (--left === 0) refreshPreviews();
         };
         if (img.decode) img.decode().then(ready, ready);
         else ready();
       };
       img.onerror = () => {
+        if (attempt < SPRITE_RETRY) {
+          /* 退避 + 抖动，避免一批图同时重试又同时失败 */
+          const wait = 600 * Math.pow(2.4, attempt - 1) + Math.random() * 300;
+          setTimeout(() => fetchOne(f, attempt + 1), wait);
+          return;
+        }
         left--;
         if (window.console) console.warn('[danaiwa] 素材载入失败，已回退为程序化水果：' + f.file);
+        if (left === 0) refreshPreviews();
       };
-      img.src = f.file;
+      /* 重试时换一个带参地址，绕开浏览器对上次失败结果的缓存 */
+      img.src = attempt > 1 ? (f.file + '?retry=' + attempt) : f.file;
+    }
+
+    for (let i = 0; i < FRUITS.length; i++) {
+      const f = FRUITS[i];
+      if (!f.file) continue;
+      left++;
+      fetchOne(f, 1);
     }
     return left;
   }
@@ -1002,8 +1144,13 @@
     paintSoundBtn();
     bindHud();
 
+    /* 越线那一屏的两个按钮 */
+    if (reviveBtn) reviveBtn.addEventListener('click', revive);
+    if (giveUpBtn) giveUpBtn.addEventListener('click', settle);
+
     drawChain();
     reset();
+    loadBlur();             // 占位图是内联的，几乎立刻可用
     loadSprites();          // 贴图异步到位，到了会自动重画预览
     requestAnimationFrame((t) => { last = t; requestAnimationFrame(frame); });
   }
@@ -1017,11 +1164,15 @@
   /* 调试句柄（控制台可用）：__DNW__.state / .reset() / .drop() / .FRUITS / .render() /
      __DNW__.playReplay(record, meta) / .stopReplay() —— 后两个是「重放」按钮的入口。
      state 是 getter：看回放时它指向播放实例，退出来又指回你这一局，
-     而 `sim.state`（你那一局）从头到尾是同一个对象，测试可以直接拿。 */
+     而 `sim.state`（你那一局）从头到尾是同一个对象，测试可以直接拿。
+     revive / settle / gameOver / addScore 是玩法层的入口（复活系统自检用）。 */
   window.__DNW__ = {
     get state() { return state; },
     reset, tryDrop, stepPhysics, FRUITS, render, resizeCanvas, shapeOf, makeBall, sim,
     playReplay, stopReplay,
+    revive, settle, gameOver, askRevive, paintRevives, addScore, pumpEvents, update,
+    MAX_BONUS, REVIVE_STEP,
+    blurReady: () => !!blurImg,
     get mode() { return mode; },
     get player() { return player; },
     get playSpeed() { return playSpeed; }
